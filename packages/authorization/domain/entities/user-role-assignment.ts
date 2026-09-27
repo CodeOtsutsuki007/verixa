@@ -3,7 +3,7 @@ import { createId, type Id, Result, ValidationError } from "@verixa/shared-kerne
 export type UserRoleAssignmentId = Id<"UserRoleAssignmentId">;
 export type UserId = Id<"UserId">;
 export type RoleId = Id<"RoleId">;
-export type OrgId = Id<"OrganizationId">;
+export type OrgId = Id<"OrgId">;
 
 export interface UserRoleAssignmentProps {
   readonly id: UserRoleAssignmentId;

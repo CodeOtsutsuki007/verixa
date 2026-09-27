@@ -5,6 +5,20 @@ export type {
   UserRoleAssignmentRepository,
 } from "./application/ports/user-role-assignment-repository.js";
 export {
+  PermissionChecker,
+  type PermissionCheckerOptions,
+} from "./application/services/permission-checker.js";
+export {
+  requirePermission,
+  requireAnyPermission,
+  requireAllPermissions,
+  type AuthenticatedPrincipal,
+  type GuardReply,
+  type OrgIdResolver,
+  type PermissionCheckerLike,
+  type RequestWithPrincipal,
+} from "./interface/guards/require-permission.js";
+export {
   AssignPermissionToRole,
   type AssignPermissionToRoleCommand,
   type AssignPermissionToRoleError,
