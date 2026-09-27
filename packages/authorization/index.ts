@@ -24,6 +24,11 @@ export {
   type AssignPermissionToRoleError,
 } from "./application/use-cases/assign-permission-to-role.js";
 export {
+  AssignRoleToUser,
+  type AssignRoleToUserCommand,
+  type AssignRoleToUserError,
+} from "./application/use-cases/assign-role-to-user.js";
+export {
   CreateRole,
   type CreateRoleCommand,
   type CreateRoleError,
@@ -38,6 +43,11 @@ export {
   type RevokePermissionFromRoleCommand,
   type RevokePermissionFromRoleError,
 } from "./application/use-cases/revoke-permission-from-role.js";
+export {
+  RevokeRoleFromUser,
+  type RevokeRoleFromUserCommand,
+  type RevokeRoleFromUserError,
+} from "./application/use-cases/revoke-role-from-user.js";
 export {
   Role,
   type CreateRoleParams,
