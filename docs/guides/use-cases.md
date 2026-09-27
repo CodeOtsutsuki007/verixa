@@ -166,3 +166,31 @@ persists it — the "send the email with this token" step is simply not
 implemented anywhere yet, which is a different thing from being designed
 wrong. See `docs/guides/domain-modeling.md` for the general principle this
 follows.
+
+## Scoped uniqueness: `CreateRole`
+
+`CreateRole` (`packages/authorization/application/use-cases/create-role.ts`,
+Issue 130) enforces scoped uniqueness across role aggregates:
+a role name must be unique within an organization (for organization-scoped roles)
+or globally (for system and platform-level roles). The aggregate `Role` cannot enforce
+uniqueness on its own across sibling aggregates, so the use case queries `RoleRepository.findByName(name, orgId)`
+before persisting.
+
+## Idempotent catalog registration: `DefinePermission`
+
+`DefinePermission` (`packages/authorization/application/use-cases/define-permission.ts`,
+Issue 131) registers permissions in the system catalog during module initialization or bootstrap.
+Because bootstrap routines run on every server startup, registering a pre-existing permission
+is designed to be idempotent: the use case performs a catalog check via `PermissionRepository.findByKey(key)`
+and returns the existing permission rather than failing with a conflict error.
+
+## Cross-aggregate catalog validation: `AssignPermissionToRole` / `RevokePermissionFromRole`
+
+`AssignPermissionToRole` and `RevokePermissionFromRole` (`packages/authorization/application/use-cases/`,
+Issue 132) demonstrate the classic DDD principle that cross-aggregate invariants belong in use cases:
+
+- `AssignPermissionToRole` validates that a granted permission exists in the authoritative `PermissionRepository`
+  catalog before mutating `Role`, preventing typos and unmanaged permissions from entering roles.
+- `RevokePermissionFromRole` invokes `Role.revoke(permission)`, which protects system roles (`super-admin`)
+  from having critical permissions stripped away, translating domain-level `SystemRoleImmutableError` into
+  structured results.
