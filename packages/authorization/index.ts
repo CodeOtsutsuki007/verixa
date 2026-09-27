@@ -65,6 +65,7 @@ export {
   type SystemRoleAction,
 } from "./domain/errors/system-role-immutable-error.js";
 export { Permission } from "./domain/value-objects/permission.js";
+export { PermissionMatcher } from "./domain/services/permission-matcher.js";
 export { InMemoryPermissionRepository } from "./infrastructure/fakes/in-memory-permission-repository.js";
 export { InMemoryRoleRepository } from "./infrastructure/fakes/in-memory-role-repository.js";
 export { InMemoryUserRoleAssignmentRepository } from "./infrastructure/fakes/in-memory-user-role-assignment-repository.js";
