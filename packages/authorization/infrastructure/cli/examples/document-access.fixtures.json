@@ -1,0 +1,37 @@
+{
+  "policy": {
+    "kind": "stored",
+    "ref": "document-access"
+  },
+  "fixtures": [
+    {
+      "name": "owner may read their own document",
+      "expectedEffect": "PERMIT",
+      "context": {
+        "subject": { "subjectId": "user-1", "tenantId": "tenant-1" },
+        "resource": { "ownerId": "user-1", "sensitivity": "public" },
+        "action": { "name": "document:read" },
+        "environment": { "now": "2026-08-01T09:00:00Z" }
+      }
+    },
+    {
+      "name": "suspension beats ownership",
+      "expectedEffect": "DENY",
+      "context": {
+        "subject": { "subjectId": "user-2", "tenantId": "tenant-1", "suspended": true },
+        "resource": { "ownerId": "user-2", "sensitivity": "public" },
+        "action": { "name": "document:read" },
+        "environment": { "now": "2026-08-01T09:00:00Z" }
+      }
+    },
+    {
+      "name": "a stranger is denied",
+      "expectedEffect": "DENY",
+      "context": {
+        "subject": { "subjectId": "user-3", "tenantId": "tenant-1" },
+        "resource": { "ownerId": "user-1", "sensitivity": "public" },
+        "action": { "name": "document:read" }
+      }
+    }
+  ]
+}
