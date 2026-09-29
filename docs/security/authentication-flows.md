@@ -328,6 +328,18 @@ Phase 14. It is silent rather than logging "would have sent: &lt;token&gt;",
 because that version is the one that survives in production for a fortnight
 while every reset token in the system lands in a log aggregator.
 
+## Multi-Factor Authentication (MFA) Integration
+
+Following successful password verification, `AuthenticateWithPassword` consults an optional `MfaChecker` port to resolve the user's MFA policy (`disabled`, `optional`, or `required`) and list their active MFA methods.
+
+- **No MFA / optional and unenrolled:** Logs in unchanged, returning a direct session-issuance success result.
+- **Active methods present:** Always intercepts the flow and returns an `mfa_challenge` result containing the enrolled methods, requiring step-up verification before a session is issued.
+- **Required policy but no enrolled methods:** Returns an `enrollment_required` result and never grants a session directly.
+
+### Why decouple MFA from the credentials domain?
+
+The credentials bounded context must not depend on MFA internals. Using an interface port (`MfaChecker`) allows the login use case to orchestrate across contexts without the MFA package reaching backward into credential logic. An alternative considered was embedding MFA checks directly within the credential tables; that was rejected because it violates bounded context boundaries and prevents credential logic from remaining independently testable.
+
 ## What login does not yet do
 
 `POST /auth/login` returns the authenticated user and **no session or token**.

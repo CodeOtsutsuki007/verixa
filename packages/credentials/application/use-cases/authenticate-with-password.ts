@@ -2,6 +2,7 @@ import { Email, type User, type UserStatus } from "@verixa/identity";
 import { AccountLockedError, AuthenticationError, Result } from "@verixa/shared-kernel";
 
 import type { Credential } from "../../domain/entities/credential.js";
+import type { MfaPolicy } from "@verixa/mfa";
 import {
   DEFAULT_LOCKOUT_POLICY,
   type LockoutPolicy,
@@ -14,6 +15,22 @@ export interface AuthenticateWithPasswordCommand {
   readonly password: string;
 }
 
+export type MfaChallengeResult = {
+  readonly status: "mfa_challenge";
+  readonly userId: string;
+  readonly methods: readonly { readonly id: string; readonly type: string }[];
+};
+
+export type EnrollmentRequiredResult = {
+  readonly status: "enrollment_required";
+  readonly userId: string;
+};
+
+export type AuthenticateWithPasswordSuccessResult =
+  | { readonly user: User; readonly rehashed: boolean; readonly status?: undefined }
+  | MfaChallengeResult
+  | EnrollmentRequiredResult;
+
 export interface AuthenticateWithPasswordResult {
   readonly user: User;
   /** True when the stored hash was upgraded during this login. Diagnostic only. */
@@ -21,6 +38,11 @@ export interface AuthenticateWithPasswordResult {
 }
 
 export type AuthenticateWithPasswordError = AuthenticationError | AccountLockedError;
+
+export interface MfaChecker {
+  resolvePolicy(userId: string): Promise<MfaPolicy>;
+  listActiveMethods(userId: string): Promise<readonly { readonly id: string; readonly type: string }[]>;
+}
 
 /**
  * Decoy hashes, one per hasher, used to burn time when there is no real
@@ -134,6 +156,7 @@ export class AuthenticateWithPassword {
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly passwordHasher: PasswordHasher,
     private readonly lockoutPolicy: LockoutPolicy = DEFAULT_LOCKOUT_POLICY,
+    private readonly mfaChecker?: MfaChecker,
   ) {}
 
   async execute(
@@ -269,6 +292,39 @@ export class AuthenticateWithPassword {
     // commit, where nothing is left to catch it. Out here, a failed upgrade
     // is genuinely inert.
     const rehashed = await this.upgradeHashIfStale(verified.credential, command.password);
+
+    if (this.mfaChecker !== undefined) {
+      const policy = await this.mfaChecker.resolvePolicy(verified.user.id);
+      const activeMethods = await this.mfaChecker.listActiveMethods(verified.user.id);
+
+      if (policy === "required" && activeMethods.length === 0) {
+        return Result.ok({
+          user: verified.user,
+          rehashed,
+          status: "enrollment_required",
+          userId: verified.user.id,
+        } as unknown as AuthenticateWithPasswordResult);
+      }
+
+      if (policy === "required" || (policy === "optional" && activeMethods.length > 0) || activeMethods.length > 0) {
+        if (activeMethods.length > 0) {
+          return Result.ok({
+            user: verified.user,
+            rehashed,
+            status: "mfa_challenge",
+            userId: verified.user.id,
+            methods: activeMethods,
+          } as unknown as AuthenticateWithPasswordResult);
+        } else if (policy === "required") {
+          return Result.ok({
+            user: verified.user,
+            rehashed,
+            status: "enrollment_required",
+            userId: verified.user.id,
+          } as unknown as AuthenticateWithPasswordResult);
+        }
+      }
+    }
 
     return Result.ok({ user: verified.user, rehashed });
   }

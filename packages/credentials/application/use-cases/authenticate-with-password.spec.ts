@@ -71,6 +71,46 @@ describe("AuthenticateWithPassword", () => {
       if (!Result.isOk(result)) return;
       expect(result.value.user.status).toBe("pending");
     });
+
+    it("logs in unchanged when no MFA and optional/disabled policy", async () => {
+      const mfaChecker = {
+        resolvePolicy: async () => "optional" as const,
+        listActiveMethods: async () => [],
+      };
+      const useCase = new AuthenticateWithPassword(unitOfWork, hasher, undefined, mfaChecker);
+      const result = await useCase.execute({ email: EMAIL, password: PASSWORD });
+
+      expect(Result.isOk(result)).toBe(true);
+      if (!Result.isOk(result)) return;
+      expect((result.value as any).status).toBeUndefined();
+    });
+
+    it("always issues a challenge when user has active methods", async () => {
+      const mfaChecker = {
+        resolvePolicy: async () => "optional" as const,
+        listActiveMethods: async () => [{ id: "m1", type: "totp" }],
+      };
+      const useCase = new AuthenticateWithPassword(unitOfWork, hasher, undefined, mfaChecker);
+      const result = await useCase.execute({ email: EMAIL, password: PASSWORD });
+
+      expect(Result.isOk(result)).toBe(true);
+      if (!Result.isOk(result)) return;
+      expect((result.value as any).status).toBe("mfa_challenge");
+      expect((result.value as any).methods).toHaveLength(1);
+    });
+
+    it("routes required-but-unenrolled users to enrollment and never grants a session", async () => {
+      const mfaChecker = {
+        resolvePolicy: async () => "required" as const,
+        listActiveMethods: async () => [],
+      };
+      const useCase = new AuthenticateWithPassword(unitOfWork, hasher, undefined, mfaChecker);
+      const result = await useCase.execute({ email: EMAIL, password: PASSWORD });
+
+      expect(Result.isOk(result)).toBe(true);
+      if (!Result.isOk(result)) return;
+      expect((result.value as any).status).toBe("enrollment_required");
+    });
   });
 
   describe("does not reveal why it failed", () => {
