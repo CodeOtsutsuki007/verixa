@@ -91,3 +91,21 @@ When a user requests a new set of backup codes, the new set completely replaces 
 
 **Why?**
 We deliberately rejected the alternative of "appending" new codes to an ever-growing pool of valid backup codes. While an additive pool might seem more forgiving if a user finds an old printout, it is insecure: it means a compromised set of codes remains permanently valid unless explicitly revoked by the user, and an attacker who gains temporary access could generate a second set for themselves without alerting the user by breaking the first set. Full-set replacement guarantees that the user always has exactly one authoritative, finite set of codes at any time, and that generating a new set acts as an implicit revocation of any previously compromised or lost sets.
+
+### WebAuthn Credential Entity and Repository Design
+
+The `WebAuthnCredential` domain entity models the FIDO2/WebAuthn public key credential registered by a user's authenticator (e.g., TouchID, YubiKey, Windows Hello). 
+
+#### Security Properties & Design Decisions
+
+1. **Public Key Only Storage:**
+   - The entity stores *only* the authenticator's public key (`publicKey`) and credential identifier (`credentialId`), alongside the signature counter (`signCounter`), transports, and attestation type.
+   - **Rejected Alternative:** Storing authenticator private keys or session tokens in plaintext. Private keys never leave the hardware authenticator security enclave. Storing only public keys ensures that even a catastrophic database breach yields no usable material to impersonate users or forge authentication assertions.
+
+2. **Sign Counter & Clone Detection:**
+   - Authenticator hardware maintains an incrementing `signCounter` for each issued assertion. Every successful verification updates this counter.
+   - **Rejected Alternative:** Ignoring signature counters or relying solely on challenge randomness. Tracking `signCounter` enables clone detection (Issue 113): if a server receives an assertion where the counter is less than or equal to a previously recorded counter for the same credential, it indicates that an authenticator clone has been manufactured or compromised, allowing Verixa to immediately revoke or flag the credential.
+
+3. **Persistence and Ports & Adapters Architecture:**
+   - Domain rules remain entirely decoupled from infrastructure via the `WebAuthnCredentialRepository` port.
+   - `PrismaWebAuthnCredentialRepository` implements the persistence adapter utilizing PostgreSQL arrays for transports and cascading relations to the `MfaMethod` aggregate root.
