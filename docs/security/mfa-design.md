@@ -36,6 +36,16 @@ The `TotpAlgorithm` domain service is explicitly tested against the standard tes
 Network latency, clock drift on the user's device, and the time it takes a user to type a code can cause a TOTP code to arrive just after its 30-second window expires.
 
 To handle this gracefully, the verification algorithm accepts codes within a small sliding window (`Â±1` step, i.e., 30 seconds before or after the current server time). This provides a 90-second overall acceptance window, minimizing false rejections without significantly degrading security.
+## Pending-MFA Challenge & Session-Issuance Gate
+
+When a password verification succeeds but the resolved enforcement policy (Issue 114) requires a second factor, Verixa issues an `MfaChallenge` entity rather than a full `Session`.
+
+**Why we separate password verification from session issuance via an intermediate challenge:**
+In tutorial-grade authentication flows, passing the password check directly grants a full session, after which MFA checks are bolted on as a subsequent route guard or middleware. If a bug or misconfiguration bypasses the MFA middleware, an attacker who guesses a password gains full API access immediately. By introducing a short-lived (5-minute), single-use `MfaChallenge` token, a password-verified user holds an entity that cannot authorize any API access whatsoever. A full session is issued by `IssueSession` (Issue 087) only after a method-specific verification use case successfully consumes the challenge.
+
+*Alternative considered:* Store a "password_verified" flag directly on a preliminary session or return a custom temporary bearer token that doubles as a session.
+*Reason rejected:* A preliminary session with reduced privileges increases the attack surface and risks state-machine confusion where a bug treats a pending session as active. A dedicated `MfaChallenge` aggregate with strict single-use semantics and explicit expiry guarantees complete isolation between authentication steps.
+
 ## TOTP Enrollment
 
 When a user begins the TOTP enrollment process, we generate a CSPRNG base32 secret and an \otpauth://\ provisioning URI. 
