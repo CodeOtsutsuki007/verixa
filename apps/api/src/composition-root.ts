@@ -2,9 +2,14 @@ import { randomUUID } from "node:crypto";
 
 import {
   AnchorAuditLog,
+  PermissionGrantedAuditSubscriber,
   PrismaAnchorRecordRepository,
   PrismaAuditLogRepository,
+  QueryAuditEvents,
   RecordAuditEvent,
+  RoleAssignedAuditSubscriber,
+  SessionCreatedAuditSubscriber,
+  SessionRevokedAuditSubscriber,
 } from "@verixa/audit";
 import { loadConfig } from "@verixa/config";
 import {
@@ -31,6 +36,7 @@ import {
   SuspendUser,
   UpdateUserProfile,
 } from "@verixa/identity";
+import { NoopRateLimiter } from "@verixa/shared-kernel";
 import { StellarHashAnchor } from "@verixa/stellar-anchor";
 
 /**
@@ -104,6 +110,7 @@ export interface CredentialUseCases {
 /** Audit recording and its external anchoring. */
 export interface AuditUseCases {
   readonly recordEvent: RecordAuditEvent;
+  readonly queryEvents: QueryAuditEvents;
   /**
    * Present only when an anchoring ledger is configured.
    *
@@ -117,6 +124,7 @@ export interface AuditUseCases {
 
 export interface Container {
   readonly prisma: PrismaClient;
+  readonly eventPublisher: DomainEventPublisher;
   readonly identity: IdentityUseCases;
   readonly credentials: CredentialUseCases;
   readonly audit: AuditUseCases;
@@ -158,14 +166,47 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
   // exist now is what stops "invalidate sessions on password reset" becoming
   // a step someone has to remember to add later — the most commonly missed
   // part of a reset flow.
+  //
+  // `NoopRateLimiter` always allows requests — rate limiting is Phase 15.
+  // It is wired as the default adapter so use cases work before the real
+  // limiter exists. No changes to use cases required when the real one
+  // arrives — only a new adapter and a new wire in composition root.
   const credentialNotifier = new NullCredentialNotifier();
   const sessionRevoker = new NoSessionsRevoker();
+  const rateLimiter = new NoopRateLimiter();
 
   // Audit recording. Failures are logged and never propagated -- see
   // RecordAuditEvent on why a failed audit write must not fail the operation
   // it was recording.
   const auditLog = new PrismaAuditLogRepository(prisma.auditLogEntry);
   const anchorRecords = new PrismaAnchorRecordRepository(prisma.anchorRecord, () => randomUUID());
+
+  const recordAuditEvent = new RecordAuditEvent(auditLog, (error: unknown) => {
+    // Written to stderr rather than swallowed entirely: a gap in the audit
+    // log is itself a security-relevant event, and the sequence gap it
+    // leaves is deliberately visible to `verifyChain`.
+    process.stderr.write(
+      `audit write failed: ${error instanceof Error ? error.message : String(error)}
+`,
+    );
+  });
+
+  // Domain event publisher with audit subscribers (Phase 10, Issue 186).
+  // Subscribe to session lifecycle events (SessionCreated, SessionRevoked from Phase 05)
+  // and RBAC events (RoleAssigned, PermissionGranted from Phase 07).
+  const eventPublisher = new InMemoryEventPublisher();
+
+  // Session audit subscribers
+  const sessionCreatedSubscriber = new SessionCreatedAuditSubscriber(recordAuditEvent);
+  const sessionRevokedSubscriber = new SessionRevokedAuditSubscriber(recordAuditEvent);
+  eventPublisher.subscribe("sessions.session.created", (event) => sessionCreatedSubscriber.handle(event));
+  eventPublisher.subscribe("sessions.session.revoked", (event) => sessionRevokedSubscriber.handle(event));
+
+  // RBAC audit subscribers
+  const roleAssignedSubscriber = new RoleAssignedAuditSubscriber(recordAuditEvent);
+  const permissionGrantedSubscriber = new PermissionGrantedAuditSubscriber(recordAuditEvent);
+  eventPublisher.subscribe("rbac.role.assigned", (event) => roleAssignedSubscriber.handle(event));
+  eventPublisher.subscribe("rbac.permission.granted", (event) => permissionGrantedSubscriber.handle(event));
 
   // Anchoring is wired only when a signing key is configured. See AuditUseCases
   // on why this is `undefined` rather than a no-op.
@@ -185,6 +226,7 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
 
   return {
     prisma,
+    eventPublisher,
     identity: {
       registerUser: new RegisterUser(users),
       updateUserProfile: new UpdateUserProfile(users),
@@ -196,34 +238,40 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
       inviteUserToOrganization: new InviteUserToOrganization(invitations),
     },
     credentials: {
-      registerUserWithPassword: new RegisterUserWithPassword(credentialsUnitOfWork, passwordHasher),
+      registerUserWithPassword: new RegisterUserWithPassword(
+        credentialsUnitOfWork,
+        passwordHasher,
+        rateLimiter,
+      ),
       // Shares the hasher instance with registration deliberately. Beyond
       // avoiding a second allocation, the timing decoy that hides whether an
       // account exists is cached per hasher, so a second instance would build
       // its own on the first failed login.
-      authenticateWithPassword: new AuthenticateWithPassword(credentialsUnitOfWork, passwordHasher),
+      authenticateWithPassword: new AuthenticateWithPassword(
+        credentialsUnitOfWork,
+        passwordHasher,
+        rateLimiter,
+      ),
       requestEmailVerification: new RequestEmailVerification(
         credentialsUnitOfWork,
         credentialNotifier,
       ),
       confirmEmailVerification: new ConfirmEmailVerification(credentialsUnitOfWork),
-      requestPasswordReset: new RequestPasswordReset(credentialsUnitOfWork, credentialNotifier),
+      requestPasswordReset: new RequestPasswordReset(
+        credentialsUnitOfWork,
+        credentialNotifier,
+        rateLimiter,
+      ),
       confirmPasswordReset: new ConfirmPasswordReset(
         credentialsUnitOfWork,
         passwordHasher,
         sessionRevoker,
+        rateLimiter,
       ),
     },
     audit: {
-      recordEvent: new RecordAuditEvent(auditLog, (error: unknown) => {
-        // Written to stderr rather than swallowed entirely: a gap in the audit
-        // log is itself a security-relevant event, and the sequence gap it
-        // leaves is deliberately visible to `verifyChain`.
-        process.stderr.write(
-          `audit write failed: ${error instanceof Error ? error.message : String(error)}
-`,
-        );
-      }),
+      recordEvent: recordAuditEvent,
+      queryEvents: new QueryAuditEvents(auditLog),
       anchor:
         hashAnchor === undefined
           ? undefined

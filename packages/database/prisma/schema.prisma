@@ -294,6 +294,13 @@ model Credential {
   /// nothing in the request path to notice.
   lockedUntil DateTime? @map("locked_until") @db.Timestamptz(3)
 
+  /// Password history for reuse prevention (Issue 072). Ordered most-recent
+  /// first: ["current_hash_that_moved_to_history", "older_hash", ...].
+  /// Capped at PasswordHistoryPolicy.depth (default 5) entries.
+  ///
+  /// Stored as JSON array of strings (PHC hash strings).
+  passwordHistory Json @default("[]") @map("password_history")
+
   createdAt DateTime @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
 
@@ -367,6 +374,86 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+/// Lifecycle state of a session (Issue 083).
+/// Mirrors the `SessionStatus` union in packages/sessions/domain/entities/session.ts.
+enum SessionStatus {
+  active
+  revoked
+
+  @@map("session_status")
+}
+
+/// An authenticated user's session, tracking its lifecycle from creation through
+/// expiry or explicit revocation (Issue 083). Maps to the `Session` aggregate in
+/// packages/sessions/domain/entities/session.ts.
+///
+/// Sessions are lightweight: they only store the user reference, timing metadata,
+/// and status. Session tokens (access tokens, refresh tokens) are issued from
+/// sessions but stored separately (refresh tokens in Phase 05, revocation deny-list
+/// in Phase 05 Issue 088).
+///
+/// ### Indexing strategy for "active sessions per user" queries
+///
+/// The primary index `(userId, expiresAt)` supports the most common query:
+/// "fetch all non-expired sessions for a user" (used by Issue 095 "list devices",
+/// Issue 094 "session limits", etc.). By sorting on both columns, a query like
+///
+///   SELECT * FROM sessions WHERE userId = ? AND status = 'active' AND expiresAt > now()
+///
+/// uses a single index scan without a secondary sort. This avoids a sequential
+/// table scan in high-session-count scenarios (e.g., a power user with many devices).
+///
+/// The secondary index on `expiresAt` alone supports the background expiry sweep
+/// (not shown here, Phase 24 equivalent) to clean up or archive stale rows without
+/// a full table scan.
+///
+/// ### Row-Level Security (RLS) awareness
+///
+/// Sessions belong to users, who belong to organizations. A session should never be
+/// readable across tenant boundaries. Once Issue 052 (RLS) is implemented, a Postgres
+/// policy will be added to enforce this: sessions are only readable by the owning
+/// user or by the owning organization's members with appropriate scope. For now,
+/// this is documented as a constraint; the policy itself is added when the RLS
+/// infrastructure exists.
+model Session {
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+
+  /// When the session was created.
+  createdAt DateTime @map("created_at") @db.Timestamptz(3)
+
+  /// When the session was last active (accessed, or touched by request handling).
+  /// Updated by the application on each request, used for activity-based metrics
+  /// and for sliding-window expiry calculations.
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(3)
+
+  /// When the session expires. Computed at creation (and optionally extended by
+  /// activity under a sliding-expiry policy). After this instant passes, the
+  /// session is no longer valid, even if `status` is still `active`.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// When the session was explicitly revoked, if at all. Null means not revoked.
+  /// Once set, the session is permanently invalid regardless of `expiresAt`.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  status SessionStatus
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Fast lookup for "active sessions per user" (used by Issue 095 "list devices",
+  /// Issue 094 "session limits", Issue 092 "log out everywhere", etc.).
+  /// Sorted on both columns means range queries like
+  ///   WHERE userId = ? AND status = 'active' AND expiresAt > now()
+  /// use this index without a secondary sort.
+  @@index([userId, expiresAt])
+
+  /// Supports background expiry sweep (Issue 024 Phase equivalent).
+  @@index([expiresAt])
+
+  @@map("sessions")
+}
+
 /// Append-only, hash-chained record of security-relevant events (Phase 10).
 ///
 /// Each row commits to its predecessor, so altering or removing one breaks
@@ -405,6 +492,7 @@ model AuditLogEntry {
 
   @@index([occurredAt])
   @@index([actorId])
+  @@index([subjectId])
   @@map("audit_log_entries")
 }
 
