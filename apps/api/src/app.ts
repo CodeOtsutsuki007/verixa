@@ -1,3 +1,4 @@
+import { registerAdminAuthorizationRoutes } from "@verixa/authorization";
 import { createLogger, type Logger } from "@verixa/shared-kernel";
 import Fastify from "fastify";
 
@@ -64,6 +65,7 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.container !== undefined) {
     registerAuthRoutes(app, options.container);
+    registerAdminAuthorizationRoutes(app, options.container.authorization);
   }
 
   return app;

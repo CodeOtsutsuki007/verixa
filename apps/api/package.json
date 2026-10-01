@@ -27,6 +27,7 @@
   },
   "dependencies": {
     "@verixa/audit": "workspace:*",
+    "@verixa/authorization": "workspace:*",
     "@verixa/config": "workspace:*",
     "@verixa/credentials": "workspace:*",
     "@verixa/database": "workspace:*",

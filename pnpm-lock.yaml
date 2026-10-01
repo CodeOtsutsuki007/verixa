@@ -56,6 +56,9 @@ importers:
       '@verixa/audit':
         specifier: workspace:*
         version: link:../../packages/audit
+      '@verixa/authorization':
+        specifier: workspace:*
+        version: link:../../packages/authorization
       '@verixa/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -130,9 +133,18 @@ importers:
 
   packages/authorization:
     dependencies:
+      '@prisma/client':
+        specifier: ^6.2.1
+        version: 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
+      '@verixa/database':
+        specifier: workspace:*
+        version: link:../database
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
+      fastify:
+        specifier: ^5.12.1
+        version: 5.12.4
     devDependencies:
       '@types/node':
         specifier: ^22.10.0

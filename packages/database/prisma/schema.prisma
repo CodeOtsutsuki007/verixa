@@ -111,6 +111,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens     PasswordResetToken[]
   mfaMethods              MfaMethod[]
+  roleAssignments         UserRoleAssignment[]
 
   @@index([deletedAt])
   @@map("users")
@@ -166,6 +167,7 @@ model Organization {
 
   memberships OrganizationMembership[]
   invitations Invitation[]
+  roles       Role[]
 
   @@map("organizations")
 }
@@ -195,6 +197,60 @@ model OrganizationMembership {
   @@index([organizationId])
   @@index([userId, organizationId])
   @@map("organization_memberships")
+}
+
+model Permission {
+  id          String           @id @db.Uuid
+  key         String           @unique
+  description String
+  createdAt   DateTime         @map("created_at") @db.Timestamptz(3)
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model Role {
+  id             String               @id @db.Uuid
+  name           String
+  description    String
+  isSystemRole   Boolean              @map("is_system_role")
+  organizationId String?              @map("organization_id") @db.Uuid
+  createdAt      DateTime             @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime             @map("updated_at") @db.Timestamptz(3)
+  organization   Organization?        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  permissions    RolePermission[]
+  assignments    UserRoleAssignment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserRoleAssignment {
+  id             String    @id @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  roleId         String    @map("role_id") @db.Uuid
+  organizationId String?   @map("organization_id") @db.Uuid
+  assignedAt     DateTime  @map("assigned_at") @db.Timestamptz(3)
+  assignedBy     String?   @map("assigned_by") @db.Uuid
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(3)
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@index([userId, organizationId])
+  @@index([roleId])
+  @@map("user_role_assignments")
 }
 
 /// Mirrors the `InvitationStatus` union in

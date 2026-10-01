@@ -14,7 +14,10 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@verixa/shared-kernel": "workspace:*"
+    "@prisma/client": "^6.2.1",
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*",
+    "fastify": "^5.12.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
