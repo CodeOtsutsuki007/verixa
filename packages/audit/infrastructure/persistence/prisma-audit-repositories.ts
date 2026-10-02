@@ -4,6 +4,7 @@ import type {
   AnchorRecord,
   AnchorRecordRepository,
   AuditLogRepository,
+  FindWithFiltersParams,
 } from "../../application/ports/audit-log-repository.js";
 import { type AuditAction, AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
 
@@ -55,8 +56,15 @@ interface AnchorRow {
 interface AuditDelegate {
   findFirst(args: { orderBy: { sequence: "desc" } }): Promise<AuditRow | null>;
   findMany(args: {
-    where: { sequence: { gte: number } };
-    orderBy: { sequence: "asc" };
+    where?: {
+      sequence?: { gte: number };
+      actorId?: string;
+      subjectId?: string;
+      action?: string;
+      occurredAt?: { gte?: Date; lte?: Date };
+      metadata?: { path: string[]; equals: string };
+    };
+    orderBy: { sequence: "asc" | "desc" };
     take: number;
   }): Promise<AuditRow[]>;
   create(args: { data: AuditRowInput }): Promise<AuditRow>;
@@ -147,6 +155,54 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
       orderBy: { sequence: "asc" },
       take: limit,
     });
+    return rows.map((row) => AuditLogEntryMapper.toDomain(row));
+  }
+
+  async findWithFilters(params: FindWithFiltersParams): Promise<readonly AuditLogEntry[]> {
+    const where: {
+      sequence?: { gte: number };
+      actorId?: string;
+      subjectId?: string;
+      action?: string;
+      occurredAt?: { gte?: Date; lte?: Date };
+      metadata?: { path: string[]; equals: string };
+    } = {
+      sequence: { gte: params.fromSequence },
+    };
+
+    if (params.filters.actorId) {
+      where.actorId = params.filters.actorId;
+    }
+
+    if (params.filters.subjectId) {
+      where.subjectId = params.filters.subjectId;
+    }
+
+    if (params.filters.action) {
+      where.action = params.filters.action;
+    }
+
+    if (params.filters.organizationId) {
+      // organizationId is stored in metadata as a JSON field
+      where.metadata = { path: ["organizationId"], equals: params.filters.organizationId };
+    }
+
+    if (params.filters.fromDate || params.filters.toDate) {
+      where.occurredAt = {};
+      if (params.filters.fromDate) {
+        where.occurredAt.gte = params.filters.fromDate;
+      }
+      if (params.filters.toDate) {
+        where.occurredAt.lte = params.filters.toDate;
+      }
+    }
+
+    const rows = await this.entries.findMany({
+      where,
+      orderBy: { sequence: "asc" },
+      take: params.limit,
+    });
+
     return rows.map((row) => AuditLogEntryMapper.toDomain(row));
   }
 

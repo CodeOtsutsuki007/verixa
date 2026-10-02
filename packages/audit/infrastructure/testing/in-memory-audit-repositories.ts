@@ -2,6 +2,7 @@ import type {
   AnchorRecord,
   AnchorRecordRepository,
   AuditLogRepository,
+  FindWithFiltersParams,
 } from "../../application/ports/audit-log-repository.js";
 import type { AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
 
@@ -34,6 +35,38 @@ export class InMemoryAuditLogRepository implements AuditLogRepository {
     return Promise.resolve(
       this.entries.filter((entry) => entry.sequence >= fromSequence).slice(0, limit),
     );
+  }
+
+  findWithFilters(params: FindWithFiltersParams): Promise<readonly AuditLogEntry[]> {
+    let filtered = this.entries.filter((entry) => entry.sequence >= params.fromSequence);
+
+    if (params.filters.actorId) {
+      filtered = filtered.filter((entry) => entry.actorId === params.filters.actorId);
+    }
+
+    if (params.filters.subjectId) {
+      filtered = filtered.filter((entry) => entry.subjectId === params.filters.subjectId);
+    }
+
+    if (params.filters.action) {
+      filtered = filtered.filter((entry) => entry.action === params.filters.action);
+    }
+
+    if (params.filters.organizationId) {
+      filtered = filtered.filter(
+        (entry) => entry.metadata["organizationId"] === params.filters.organizationId,
+      );
+    }
+
+    if (params.filters.fromDate) {
+      filtered = filtered.filter((entry) => entry.occurredAt >= params.filters.fromDate!);
+    }
+
+    if (params.filters.toDate) {
+      filtered = filtered.filter((entry) => entry.occurredAt <= params.filters.toDate!);
+    }
+
+    return Promise.resolve(filtered.slice(0, params.limit));
   }
 
   count(): Promise<number> {

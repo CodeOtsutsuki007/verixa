@@ -98,6 +98,38 @@ aggregate before pulling events, this scheme would need to accumulate
 across calls instead — revisit this design if/when that need actually
 arises, rather than generalizing for it now.
 
+## Cross-context event handling
+
+Domain events allow bounded contexts to react to each other's state changes
+without directly importing each other's code or inverting the dependency
+graph.
+
+### UserStatusChanged → Credentials invalidation
+
+When the **Identity** context soft-deletes a user (via `User.delete()`), it
+emits a `UserStatusChanged` event with `newStatus === "deleted"`. The
+**Credentials** context listens for this event via `HandleUserDeleted`
+(Issue 075), which atomically:
+
+1. Invalidates all outstanding email verification tokens (`consumedAt` is set)
+2. Invalidates all outstanding password reset tokens (`consumedAt` is set)
+3. Clears the credential's failure counter and any lockout state
+
+This ensures a soft-deleted user cannot:
+
+- Authenticate with a retained password
+- Use a verification link generated before deletion
+- Use a password reset link generated before deletion
+
+The handler is intentionally defensive: if a user has no credential record
+(SSO-only or passkey-only accounts), no error is raised — the operation
+logically completes because there is nothing to clean up.
+
+**Pattern**: The Identity context knows nothing about Credentials. Credentials
+reacts to Identity events. Neither context imports the other directly — they
+are decoupled through events and the `CredentialsUnitOfWork` port, which
+crosses the boundary.
+
 ## Event catalog
 
 | Event                           | Aggregate    | Recorded when                                                                                                 |

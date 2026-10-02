@@ -167,6 +167,13 @@ jobs:
       - name: Identity coverage gate
         run: pnpm --filter @verixa/identity run test:coverage
 
+      # packages/credentials is the second fully-built bounded context,
+      # following the Phase 02 coverage-gate pattern established in Issue 037.
+      # Enforced separately from the plain `pnpm test` above to keep coverage
+      # collection overhead isolated to contexts that require it.
+      - name: Credentials coverage gate
+        run: pnpm --filter @verixa/credentials run test:coverage
+
   # Verifies the *other* database strategy. The `ci` job above points
   # TEST_DATABASE_URL at a service container, so it never exercises the
   # Testcontainers path in database-harness.ts (Issue 047). This job
