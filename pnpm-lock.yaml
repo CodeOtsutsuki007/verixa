@@ -150,7 +150,7 @@ importers:
         version: link:../shared-kernel
       fastify:
         specifier: ^5.12.1
-        version: 5.12.4
+        version: 5.12.5
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
