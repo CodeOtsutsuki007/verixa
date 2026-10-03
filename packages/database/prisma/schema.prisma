@@ -112,7 +112,7 @@ model User {
   passwordResetTokens     PasswordResetToken[]
   mfaMethods              MfaMethod[]
   roleAssignments         UserRoleAssignment[]
-  verificationRequests    VerificationRequest[]      @relation("VerificationRequestSubject")
+  verificationRequests    VerificationRequest[]    @relation("VerificationRequestSubject")
   sessions                Session[]
 
   @@index([deletedAt])
@@ -167,10 +167,10 @@ model Organization {
   /// forcing that as a hard database error is the point.
   owner User @relation("OrganizationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
 
-  memberships OrganizationMembership[]
-  invitations Invitation[]
-  roles       Role[]
-  verificationRequests VerificationRequest[]  @relation("VerificationRequestOrganization")
+  memberships          OrganizationMembership[]
+  invitations          Invitation[]
+  roles                Role[]
+  verificationRequests VerificationRequest[]    @relation("VerificationRequestOrganization")
 
   @@map("organizations")
 }
@@ -506,10 +506,8 @@ model Session {
   ///   WHERE userId = ? AND status = 'active' AND expiresAt > now()
   /// use this index without a secondary sort.
   @@index([userId, expiresAt])
-
   /// Supports background expiry sweep (Issue 024 Phase equivalent).
   @@index([expiresAt])
-
   @@map("sessions")
 }
 
@@ -599,135 +597,6 @@ enum MfaMethodStatus {
   disabled
 
   @@map("mfa_method_status")
-}
-
-// ---------------------------------------------------------------------------
-// Phase 07 — Authorization: RBAC (Issue 128)
-//
-// The RBAC graph is three tables plus a join:
-//
-//   Role ──< role_permissions >── Permission
-//   Role ──< user_role_assignments (tenant-scoped)
-//
-// Roles and permissions are global (no organization_id), because the set of
-// roles a deployment supports is an administrative, not a tenant, concern.
-// Role *assignments* are per-organization: Alice may be an admin in org A but
-// a viewer in org B.
-//
-// `user_role_assignments` carries an `organization_id` and is covered by RLS
-// with the same policy as `organization_memberships` — see
-// docs/security/multi-tenancy.md.  The application's permission-check hot
-// path joins `user_role_assignments` → `role_permissions` → `permissions`,
-// which is why the composite indexes (userId+orgId) and (roleId) exist.
-// ---------------------------------------------------------------------------
-
-/// A named collection of permissions. Roles are org-agnostic (an "admin"
-/// role is the same concept in every org); what varies per org is which
-/// users hold that role, expressed in `UserRoleAssignment`.
-///
-/// Mirrors the `Role` entity in packages/authorization/domain/entities/role.ts.
-model Role {
-  /// Domain-assigned UUID — the same reasoning as `User.id`.
-  id String @id @db.Uuid
-
-  /// Short machine-readable name, e.g. "admin", "viewer". Unique so that
-  /// seeding can locate the canonical record by name without ambiguity.
-  name String @unique
-
-  /// Human-readable description, optional.
-  description String?
-
-  createdAt DateTime @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
-
-  permissions RolePermission[]
-  assignments UserRoleAssignment[]
-
-  @@map("roles")
-}
-
-/// A single grantable capability, e.g. "users:read", "invitations:create".
-/// Permissions are the leaf nodes of the RBAC graph — roles collect them.
-///
-/// The colon-separated `resource:action` convention is a convention, not
-/// enforced by the database; the application layer owns the namespace.
-///
-/// Mirrors the `Permission` entity in
-/// packages/authorization/domain/entities/permission.ts.
-model Permission {
-  id String @id @db.Uuid
-
-  /// Colon-separated key, unique. The application compares string keys when
-  /// checking authorization, so this is also the value domain code branches on.
-  key String @unique
-
-  description String?
-
-  createdAt DateTime @map("created_at") @db.Timestamptz(3)
-
-  roles RolePermission[]
-
-  @@map("permissions")
-}
-
-/// Join table linking roles to permissions. Pure many-to-many: a role may
-/// have many permissions, a permission may appear in many roles.
-///
-/// No surrogate id — the composite (roleId, permissionId) is the natural
-/// primary key. The reverse index on `permissionId` lets the application
-/// answer "which roles grant this permission?" without a full scan.
-model RolePermission {
-  roleId       String @map("role_id") @db.Uuid
-  permissionId String @map("permission_id") @db.Uuid
-
-  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-  @@index([permissionId])
-  @@map("role_permissions")
-}
-
-/// Records that a user holds a role within one organization. This is the
-/// tenant-scoped table: a user can be an admin in org A and a viewer in org B,
-/// so `organization_id` is load-bearing, not just a filter hint.
-///
-/// RLS policy (same pattern as `organization_memberships`):
-///
-/// ```sql
-/// CREATE POLICY "tenant_isolation" ON "user_role_assignments"
-///   USING (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid)
-///   WITH CHECK (organization_id = NULLIF(current_setting('app.current_organization_id', true), '')::uuid);
-/// ```
-///
-/// Mirrors the `UserRoleAssignment` entity in
-/// packages/authorization/domain/entities/user-role-assignment.ts.
-model UserRoleAssignment {
-  id String @id @db.Uuid
-
-  userId         String @map("user_id") @db.Uuid
-  roleId         String @map("role_id") @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-
-  /// When the assignment was made. Kept for audit purposes; the grant itself
-  /// is expressed by the row's existence.
-  assignedAt DateTime @map("assigned_at") @db.Timestamptz(3)
-
-  /// FK to `users` — `Restrict` for the same reason as `Organization.owner`:
-  /// deleting a user who still holds role assignments must fail rather than
-  /// silently removing access records that may be needed for an audit trail.
-  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
-  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  /// Composite (userId, orgId): the hot path — "what roles does this user
-  /// hold in this org" — is a point lookup on exactly these two columns.
-  /// Also enforces that a user may hold each role at most once per org.
-  @@unique([userId, organizationId, roleId])
-  @@index([userId, organizationId])
-  /// Supports "who holds this role in any org", used by admin listing and
-  /// by CASCADE-aware role-deletion logic.
-  @@index([roleId])
-  @@map("user_role_assignments")
 }
 
 /// A second factor enrolled by a user (Issue 107).
@@ -833,7 +702,7 @@ model VerificationRequest {
   /// The mandatory rationale recorded with a decision. Kept alongside the
   /// decision so an auditor reading the row does not need a join, and so the
   /// record answers "why" without a follow-up query.
-  decisionNote        String?              @map("decision_note")
+  decisionNote        String?               @map("decision_note")
 
   /// What the reviewer asked for when the request is `needs_more_info`.
   /// Visible to the subject; NULL in every other state.
