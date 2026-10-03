@@ -1,5 +1,6 @@
 import { Email } from "@verixa/identity";
 import { Result, type ValidationError } from "@verixa/shared-kernel";
+import type { RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
 
 import { PasswordResetToken } from "../../domain/entities/password-reset-token.js";
 import type { CredentialNotifier } from "../ports/credential-notifier.js";
@@ -34,24 +35,46 @@ export interface RequestPasswordResetResult {
  * So the caller always gets success. Whether anything happened is visible
  * only to the system: a token row, a delivered email, an audit entry.
  *
+ * ## Rate limiting
+ *
+ * The rate limiter is consulted at the start via the {@link RateLimiter} port,
+ * and reset on success so users can legitimately request another reset if
+ * needed. If not allowed, an error is thrown immediately. This prevents
+ * mail-bombing attacks against known addresses.
+ *
  * ## Deliberately not solved here
  *
- * Nothing rate-limits this. Anyone can trigger reset emails to any address as
- * fast as they can post, which is both a mail-bombing vector and a way to
- * invalidate a real user's outstanding link repeatedly. That is Phase 15's
- * job and it is a genuine gap until then — recorded rather than quietly
- * carried.
+ * Nothing rate-limits this beyond the configured limit. Anyone can trigger
+ * reset emails to any address as fast as they can post (up to the rate limit),
+ * which is both a mail-bombing vector and a way to invalidate a real user's
+ * outstanding link repeatedly. Rate limiting (Phase 15) provides the abuse
+ * mitigation.
  */
 export class RequestPasswordReset {
   constructor(
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly notifier: CredentialNotifier,
+    private readonly rateLimiter: RateLimiter,
     private readonly ttlMs?: number,
   ) {}
 
   async execute(
     command: RequestPasswordResetCommand,
   ): Promise<Result<RequestPasswordResetResult, ValidationError>> {
+    // 1. Check rate limit BEFORE any other logic
+    const rateLimitKey: RateLimitKey = {
+      action: "password-reset",
+      identifier: command.email,
+    };
+
+    const limitResult = await this.rateLimiter.check(rateLimitKey);
+    if (!limitResult.allowed) {
+      throw new Error(
+        `Rate limit exceeded for ${rateLimitKey.action} on ${rateLimitKey.identifier}. ` +
+          `Resets at ${new Date(limitResult.resetAt).toISOString()}`,
+      );
+    }
+
     const emailResult = Email.create(command.email);
     if (Result.isErr(emailResult)) {
       return Result.ok({ issued: false });
@@ -106,6 +129,9 @@ export class RequestPasswordReset {
     } catch {
       // Intentionally ignored. See above.
     }
+
+    // Reset rate limit counter on successful reset request
+    await this.rateLimiter.reset(rateLimitKey);
 
     return Result.ok({ issued: true });
   }

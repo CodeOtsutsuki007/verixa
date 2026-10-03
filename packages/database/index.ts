@@ -32,7 +32,11 @@ export const {
   OrganizationStatus,
   Prisma,
   PrismaClient,
+  SessionStatus,
   UserStatus,
+  VerificationDecision,
+  VerificationStatus,
+  VerificationType,
 } = prismaRuntime;
 
 // The destructuring above binds values only, and several of these names are
@@ -49,7 +53,14 @@ export type MembershipStatus =
   (typeof prismaRuntime.MembershipStatus)[keyof typeof prismaRuntime.MembershipStatus];
 export type OrganizationStatus =
   (typeof prismaRuntime.OrganizationStatus)[keyof typeof prismaRuntime.OrganizationStatus];
+export type SessionStatus = (typeof prismaRuntime.SessionStatus)[keyof typeof prismaRuntime.SessionStatus];
 export type UserStatus = (typeof prismaRuntime.UserStatus)[keyof typeof prismaRuntime.UserStatus];
+export type VerificationDecision =
+  (typeof prismaRuntime.VerificationDecision)[keyof typeof prismaRuntime.VerificationDecision];
+export type VerificationStatus =
+  (typeof prismaRuntime.VerificationStatus)[keyof typeof prismaRuntime.VerificationStatus];
+export type VerificationType =
+  (typeof prismaRuntime.VerificationType)[keyof typeof prismaRuntime.VerificationType];
 
 // Surfaced directly rather than left behind `Prisma.` — adapters need to
 // recognise it to translate constraint violations into domain errors, and a
@@ -69,6 +80,8 @@ export type {
   Invitation as InvitationRow,
   Organization as OrganizationRow,
   OrganizationMembership as OrganizationMembershipRow,
+  Session as SessionRow,
   User as UserRow,
   MfaMethod as MfaMethodRow,
+  VerificationRequest as VerificationRequestRow,
 } from "@prisma/client";

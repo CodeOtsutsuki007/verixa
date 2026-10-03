@@ -35,6 +35,7 @@ export {
   type PasswordPolicy,
   RawPassword,
 } from "./domain/value-objects/raw-password.js";
+export { PasswordChanged } from "./domain/events/password-changed.js";
 
 // Application: ports
 export {
@@ -54,6 +55,11 @@ export type {
 export type { PasswordHasher } from "./application/ports/password-hasher.js";
 
 // Application: use cases
+export {
+  ChangePassword,
+  type ChangePasswordCommand,
+  type ChangePasswordResult,
+} from "./application/use-cases/change-password.js";
 export {
   ConfirmEmailVerification,
   type ConfirmEmailVerificationCommand,
@@ -86,6 +92,7 @@ export {
   type RegisterUserWithPasswordError,
   type RegisterUserWithPasswordResult,
 } from "./application/use-cases/register-user-with-password.js";
+export { HandleUserDeleted } from "./application/use-cases/handle-user-deleted.js";
 
 // Infrastructure
 export {
@@ -104,3 +111,13 @@ export {
   PrismaEmailVerificationTokenRepository,
   PrismaPasswordResetTokenRepository,
 } from "./infrastructure/persistence/prisma-verification-token-repositories.js";
+
+// Testing fakes. Exported so contexts built on top of credentials can test
+// their own use cases against fake credential repositories, rather than each
+// re-implementing one that drifts.
+export { InMemoryCredentialRepository } from "./infrastructure/testing/in-memory-credential-repository.js";
+export { InMemoryCredentialsUnitOfWork } from "./infrastructure/testing/in-memory-credentials-unit-of-work.js";
+export {
+  InMemoryEmailVerificationTokenRepository,
+  InMemoryPasswordResetTokenRepository,
+} from "./infrastructure/testing/in-memory-verification-token-repositories.js";

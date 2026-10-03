@@ -24,6 +24,10 @@ export class InMemoryMfaMethodRepository implements MfaMethodRepository {
     );
   }
 
+  async findAllByUserId(userId: UserId): Promise<MfaMethod[]> {
+    return Array.from(this.methods.values()).filter((m) => m.userId === userId);
+  }
+
   async delete(id: MfaMethodId): Promise<void> {
     this.methods.delete(id);
   }
