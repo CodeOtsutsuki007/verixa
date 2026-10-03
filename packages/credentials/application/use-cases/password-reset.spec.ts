@@ -308,5 +308,91 @@ describe("password reset (Issues 069 and 070)", () => {
       expect(after?.failedAttempts).toBe(0);
       expect(after?.lockedUntil).toBeUndefined();
     });
+
+    // ── ISSUE 072: Password history / reuse prevention ──────────────────
+
+    it("rejects reuse of current password during reset", async () => {
+      // A user resets their password but tries to set it back to the current one.
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // same as current
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.fieldErrors["password"]).toContain("reused");
+    });
+
+    it("rejects reuse of a password from history", async () => {
+      // Set up a credential with password history
+      const user = await loadUser();
+      const credential = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      if (credential === undefined) throw new Error("fixture setup failed");
+
+      // Manually inject an old password into history to simulate prior rotations
+      const tempNew = await hasher.hash("TemporaryPassword1!");
+      const withHistory = credential.rotatePassword(tempNew, { depth: 5 });
+      await unitOfWork.repositories.credentials.save(withHistory);
+
+      // Now try to reset back to the old password
+      const rawToken = await issueToken();
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // This was the original password (in history now)
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.fieldErrors["password"]).toContain("reused");
+    });
+
+    it("accepts a new password not in history", async () => {
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: NEW_PASSWORD, // completely new password
+      });
+
+      expect(Result.isOk(result)).toBe(true);
+
+      // Verify the new password works
+      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher);
+      await expect(
+        authenticate
+          .execute({ email: EMAIL, password: NEW_PASSWORD })
+          .then((outcome) => Result.isOk(outcome)),
+      ).resolves.toBe(true);
+    });
+
+    it("maintains password history after successful reset", async () => {
+      const user = await loadUser();
+      const originalCredential = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      if (originalCredential === undefined) throw new Error("fixture setup failed");
+
+      const rawToken = await issueToken();
+      await confirm.execute({
+        token: rawToken,
+        newPassword: NEW_PASSWORD,
+      });
+
+      const updated = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      expect(updated?.passwordHistory).toContain(originalCredential.passwordHash);
+    });
+
+    it("reuse error message includes history depth", async () => {
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // reuse
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.message).toContain("5"); // default depth
+    });
   });
 });

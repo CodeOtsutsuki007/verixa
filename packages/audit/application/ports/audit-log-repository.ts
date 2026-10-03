@@ -1,5 +1,20 @@
 import type { AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
 
+export interface AuditLogFilters {
+  readonly actorId?: string | undefined;
+  readonly subjectId?: string | undefined;
+  readonly organizationId?: string | undefined;
+  readonly action?: string | undefined;
+  readonly fromDate?: Date | undefined;
+  readonly toDate?: Date | undefined;
+}
+
+export interface FindWithFiltersParams {
+  readonly filters: AuditLogFilters;
+  readonly fromSequence: number;
+  readonly limit: number;
+}
+
 /**
  * Persistence for the audit log.
  *
@@ -24,6 +39,9 @@ export interface AuditLogRepository {
 
   /** Entries from `fromSequence` onward, in order. Used by verification. */
   findFrom(fromSequence: number, limit: number): Promise<readonly AuditLogEntry[]>;
+
+  /** Queries entries with filters and cursor-based pagination. */
+  findWithFilters(params: FindWithFiltersParams): Promise<readonly AuditLogEntry[]>;
 
   /** Total entries in the log. */
   count(): Promise<number>;
@@ -63,6 +81,30 @@ export interface HashAnchorPort {
     hash: string,
   ): Promise<
     | { readonly kind: "ok"; readonly value: AnchorReceiptLike }
+    | { readonly kind: "err"; readonly error: AnchorFailure }
+  >;
+}
+
+/**
+ * The read half of an anchoring ledger: confirming that a commitment really
+ * exists somewhere the operator does not control.
+ *
+ * Declared separately from {@link HashAnchorPort} because verification needs
+ * *no credentials at all* — it reads public ledger data. Coupling the two into
+ * one port would mean a deployment that wants nothing more than to check its
+ * own anchors against the ledger has to hold a funded account's secret key to
+ * do it, which is precisely the trust boundary anchoring exists to remove.
+ *
+ * Structurally the second half of `HashAnchor` in `@verixa/stellar-anchor`,
+ * and — as with that port — deliberately not imported from it, so nothing above
+ * the adapter mentions a specific ledger.
+ */
+export interface AnchorVerifierPort {
+  verify(
+    hash: string,
+    anchorRef: string,
+  ): Promise<
+    | { readonly kind: "ok"; readonly value: boolean }
     | { readonly kind: "err"; readonly error: AnchorFailure }
   >;
 }

@@ -32,6 +32,11 @@ export class InMemoryMfaMethodRepository implements MfaMethodRepository {
     return Promise.resolve(pendingMethods);
   }
 
+  findAllByUserId(userId: Id<"UserId">): Promise<MfaMethod[]> {
+    const methods = Array.from(this.methodsById.values()).filter((m) => m.userId === userId);
+    return Promise.resolve(methods);
+  }
+
   delete(id: MfaMethodId): Promise<void> {
     this.methodsById.delete(id);
     return Promise.resolve();

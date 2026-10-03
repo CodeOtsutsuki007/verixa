@@ -7,6 +7,12 @@ export default mergeConfig(
   defineConfig({
     test: {
       name: "@verixa/sessions",
+      coverage: {
+        exclude: [
+          "**/application/ports/**",
+          "index.ts",
+          "**/infrastructure/persistence/**",
+          "**/infrastructure/testing/database-harness.ts",
 
       /**
        * The Redis integration spec starts a Testcontainers container, which

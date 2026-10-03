@@ -70,6 +70,63 @@ const envSchema = z.object({
    * surprise anyone who has not deliberately opted in.
    */
   SESSION_MAX_CONCURRENT_SESSIONS: z.coerce.number().int().min(0).default(0),
+
+  // ---------------------------------------------------------------------------
+  // MFA enforcement — global defaults (Issue 114)
+  //
+  // These are the *global* defaults that apply when no org, role, or user
+  // override is present. Individual orgs and users can raise or lower the bar
+  // via runtime configuration stored in the database (not environment
+  // variables), because per-tenant config cannot live in environment variables
+  // — you would need one deployment per tenant if it did. The fields here give
+  // operators a baseline that matches their deployment's security posture
+  // without requiring every newly-created org to be individually configured.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Global default MFA enforcement level (Issue 114).
+   *
+   * - `optional` (default): users may enroll but are not required to. A
+   *   session is issued regardless. Safe for consumer-facing products where
+   *   mandating MFA would cause friction before users understand the value.
+   * - `required`: every user must complete an MFA challenge before a session
+   *   is issued. Choose this for admin consoles, banking-style products, or
+   *   any deployment where the threat model justifies the enrollment friction.
+   * - `disabled`: MFA is blocked globally. Useful when authentication is
+   *   delegated entirely to an external IdP that already enforces MFA and you
+   *   do not want a second factor in Verixa itself.
+   *
+   * Per-org and per-user overrides take precedence over this value; see
+   * `MfaEnforcementPolicy` in `packages/mfa`.
+   */
+  MFA_ENFORCEMENT_LEVEL: z
+    .enum(["required", "optional", "disabled"])
+    .default("optional"),
+
+  /**
+   * Comma-separated list of MFA method types permitted globally (Issue 114).
+   *
+   * Absent (empty string) means all types are permitted. Supply a list to
+   * restrict: e.g. `MFA_ALLOWED_METHODS=totp,webauthn` to ban backup codes
+   * org-wide when your security policy requires phishing-resistant factors.
+   *
+   * Valid values: `totp`, `webauthn`, `backup-codes`.
+   *
+   * The alternative — a separate boolean env var per method type — was
+   * rejected because it scales poorly (N env vars for N methods, combinatorial
+   * interactions) and cannot express "any subset of the three" cleanly.
+   */
+  MFA_ALLOWED_METHODS: z
+    .string()
+    .optional()
+    .transform((val) =>
+      val
+        ? val
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+    ),
 });
 
 /** The fully validated, immutable application configuration. */

@@ -204,6 +204,43 @@ export interface ChainBreak {
 }
 
 /**
+ * Verifies a contiguous run of entries, seeded with the entry that precedes
+ * the run.
+ *
+ * The seed is what makes verification work on a *window* of a log rather than
+ * only from its genesis: a caller that pages through a million-entry log never
+ * holds the whole chain in memory, but each page still has to know what its
+ * first entry was supposed to link to. Pass `undefined` for the run that starts
+ * the chain.
+ */
+export function verifyChainFrom(
+  previous: AuditLogEntry | undefined,
+  entries: readonly AuditLogEntry[],
+): ChainBreak | undefined {
+  let predecessor = previous;
+
+  for (const entry of entries) {
+    if (!entry.hasValidHash) {
+      return { sequence: entry.sequence, reason: "content_altered" };
+    }
+
+    const expectedPreviousHash = predecessor?.hash ?? GENESIS_HASH;
+    if (entry.previousHash !== expectedPreviousHash) {
+      return { sequence: entry.sequence, reason: "link_broken" };
+    }
+
+    const expectedSequence = predecessor === undefined ? 1 : predecessor.sequence + 1;
+    if (entry.sequence !== expectedSequence) {
+      return { sequence: entry.sequence, reason: "sequence_gap" };
+    }
+
+    predecessor = entry;
+  }
+
+  return undefined;
+}
+
+/**
  * Verifies a chain, in order, and reports the first break.
  *
  * Returns the *first* break rather than all of them because everything after
@@ -219,25 +256,5 @@ export interface ChainBreak {
  *   up the hashes but not the counter.
  */
 export function verifyChain(entries: readonly AuditLogEntry[]): ChainBreak | undefined {
-  let previous: AuditLogEntry | undefined;
-
-  for (const entry of entries) {
-    if (!entry.hasValidHash) {
-      return { sequence: entry.sequence, reason: "content_altered" };
-    }
-
-    const expectedPreviousHash = previous?.hash ?? GENESIS_HASH;
-    if (entry.previousHash !== expectedPreviousHash) {
-      return { sequence: entry.sequence, reason: "link_broken" };
-    }
-
-    const expectedSequence = previous === undefined ? 1 : previous.sequence + 1;
-    if (entry.sequence !== expectedSequence) {
-      return { sequence: entry.sequence, reason: "sequence_gap" };
-    }
-
-    previous = entry;
-  }
-
-  return undefined;
+  return verifyChainFrom(undefined, entries);
 }

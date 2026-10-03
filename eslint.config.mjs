@@ -56,20 +56,31 @@ export default tseslint.config(
     // Package boundary enforcement: everything outside a context package
     // must go through its curated index.ts, never a deep path into its
     // domain/application internals — see docs/guides/domain-modeling.md
-    // ("Package encapsulation"). Scoped to exclude packages/identity itself,
-    // since its own internal files legitimately import each other by
-    // relative path; this rule targets deep imports from *other* packages.
+    // ("Package encapsulation"). Scoped to exclude packages/identity and
+    // packages/credentials themselves, since their own internal files
+    // legitimately import each other by relative path; this rule targets
+    // deep imports from *other* packages.
     files: ["**/*.ts"],
-    ignores: ["packages/identity/**", "packages/credentials/**", "packages/sessions/**"],
+    ignores: [
+      "packages/identity/**",
+      "packages/credentials/**",
+      "packages/sessions/**",
+      "packages/authorization/**",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["@verixa/identity/*", "@verixa/credentials/*", "@verixa/sessions/*"],
+              group: [
+                "@verixa/identity/*",
+                "@verixa/credentials/*",
+                "@verixa/sessions/*",
+                "@verixa/verification/*",
+              ],
               message:
-                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/sessions`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
+                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/sessions`, `@verixa/verification`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
             },
           ],
         },
