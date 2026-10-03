@@ -1,4 +1,4 @@
-import { AccountLockedError, createId } from "@verixa/shared-kernel";
+import { AccountLockedError, createId, Result } from "@verixa/shared-kernel";
 import { describe, expect, it } from "vitest";
 
 import { MfaMethod } from "../../domain/entities/mfa-method.js";
@@ -9,18 +9,21 @@ import { ConfirmTotpEnrollment } from "./confirm-totp-enrollment.js";
 describe("ConfirmTotpEnrollment", () => {
   const setup = () => {
     const savedMethods = new Map<string, MfaMethod>();
-    
+
     const fakeRepo: MfaMethodRepository = {
-      save: async (method) => { savedMethods.set(method.id, method); },
+      save: async (method) => {
+        savedMethods.set(method.id, method);
+      },
       findById: async (id) => savedMethods.get(id),
       findActiveByUserId: async () => [],
       findPendingByUserId: async () => [],
+      findAllByUserId: async () => [],
       delete: async () => {},
     };
 
     const fakeAlgo: TotpAlgorithm = {
-      generateSecret: async (name) => ({ value: "SECRET", provisioningUri: "uri" }),
-      verify: async (secret, code) => code === "123456" ? 1000 : null
+      generateSecret: async () => ({ value: "SECRET", provisioningUri: "uri" }),
+      verify: async (_secret, code) => (code === "123456" ? 1000 : null),
     };
 
     const useCase = new ConfirmTotpEnrollment(fakeRepo, fakeAlgo);
@@ -30,16 +33,15 @@ describe("ConfirmTotpEnrollment", () => {
 
   it("activates the method when given the correct code", async () => {
     const { useCase, fakeRepo, savedMethods } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
+    const method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" });
     await fakeRepo.save(method);
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "123456" // correct code
+      code: "123456", // correct code
     });
 
-    expect(result.isOk()).toBe(true);
+    expect(Result.isOk(result)).toBe(true);
     const updated = savedMethods.get(method.id)!;
     expect(updated.status).toBe("active");
     expect(updated.failedAttempts).toBe(0);
@@ -47,16 +49,15 @@ describe("ConfirmTotpEnrollment", () => {
 
   it("leaves the method pending and records a failed attempt on bad code", async () => {
     const { useCase, fakeRepo, savedMethods } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
+    const method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" });
     await fakeRepo.save(method);
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "000000" // wrong code
+      code: "000000", // wrong code
     });
 
-    expect(result.isErr()).toBe(true);
+    expect(Result.isErr(result)).toBe(true);
     const updated = savedMethods.get(method.id)!;
     expect(updated.status).toBe("pending");
     expect(updated.failedAttempts).toBe(1);
@@ -64,36 +65,38 @@ describe("ConfirmTotpEnrollment", () => {
 
   it("rejects confirmation if the method is already active", async () => {
     const { useCase, fakeRepo } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), secret).activate();
+    const method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" }).activate();
     await fakeRepo.save(method);
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "123456"
+      code: "123456",
     });
 
-    expect(result.isErr()).toBe(true);
-    expect(result.unwrapErr().message).toContain("not in a pending state");
+    expect(Result.isErr(result)).toBe(true);
+    if (Result.isErr(result)) {
+      expect(result.error.message).toContain("not in a pending state");
+    }
   });
 
   it("rate limits confirmation attempts after consecutive failures", async () => {
-    const { useCase, fakeRepo, savedMethods } = setup();
-    const secret = { value: "SECRET", provisioningUri: "uri" };
-    let method = MfaMethod.createPendingTotp(createId<"UserId">(), secret);
-    
+    const { useCase, fakeRepo } = setup();
+    let method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" });
+
     // Simulate 5 failures
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 5; i += 1) {
       method = method.recordFailedAttempt(new Date());
     }
     await fakeRepo.save(method);
 
     const result = await useCase.execute({
       methodId: method.id,
-      code: "123456" // Even correct code should be rejected
+      code: "123456", // Even correct code should be rejected
     });
 
-    expect(result.isErr()).toBe(true);
-    expect(result.unwrapErr()).toBeInstanceOf(AccountLockedError);
+    expect(Result.isErr(result)).toBe(true);
+    if (Result.isErr(result)) {
+      expect(result.error).toBeInstanceOf(AccountLockedError);
+    }
   });
 });

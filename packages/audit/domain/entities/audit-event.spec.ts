@@ -167,15 +167,18 @@ describe("AuditEvent", () => {
     it("freezes metadata to prevent mutation", () => {
       const event = AuditEvent.create({
         actorId: "user-123",
-        action: "identity.user.registered",
+        action: "identity.user.suspended",
         resourceType: "user",
         resourceId: "user-456",
         organizationId: "org-789",
-        metadata: { key: "value" },
+        // `reason` because `identity.user.suspended` has a strict schema: an
+        // arbitrary key here would be rejected by validation, and this test is
+        // about the freeze, not about which fields an action carries.
+        metadata: { reason: "policy violation" },
       });
 
       expect(() => {
-        (event.metadata as any).key = "modified";
+        (event.metadata as any).reason = "modified";
       }).toThrow();
     });
 
@@ -243,17 +246,17 @@ describe("AuditEvent", () => {
     it("creates a copy with replaced metadata", () => {
       const original = AuditEvent.create({
         actorId: "user-123",
-        action: "identity.user.registered",
+        action: "identity.user.suspended",
         resourceType: "user",
         resourceId: "user-456",
         organizationId: "org-789",
-        metadata: { original: "value" },
+        metadata: { reason: "original" },
       });
 
-      const modified = original.withMetadata({ replaced: "newValue" });
+      const modified = original.withMetadata({ reason: "replaced" });
 
-      expect(modified.metadata).toEqual({ replaced: "newValue" });
-      expect(original.metadata).toEqual({ original: "value" }); // Original unchanged
+      expect(modified.metadata).toEqual({ reason: "replaced" });
+      expect(original.metadata).toEqual({ reason: "original" }); // Original unchanged
       expect(modified.id).toBe(original.id); // Same ID
       expect(modified.action).toBe(original.action); // Same action
     });

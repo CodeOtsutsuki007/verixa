@@ -73,9 +73,14 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ["@verixa/identity/*", "@verixa/credentials/*", "@verixa/sessions/*"],
+              group: [
+                "@verixa/identity/*",
+                "@verixa/credentials/*",
+                "@verixa/sessions/*",
+                "@verixa/verification/*",
+              ],
               message:
-                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/sessions`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
+                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/sessions`, `@verixa/verification`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
             },
           ],
         },

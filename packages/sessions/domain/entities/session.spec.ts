@@ -683,4 +683,23 @@ describe("Session", () => {
       expect(serialized["refreshTokenHash"]).toBe("[REDACTED]");
     });
   });
+
+  describe("stepUpVerifiedAt", () => {
+    it("tracks fresh step-up verification and rejects staleness", () => {
+      const now = new Date("2026-01-01T00:00:00Z");
+      const { session } = Session.issue({
+        userId,
+        metadata: {},
+        accessToken: accessToken(now),
+        now,
+      });
+
+      expect(session.isStepUpFresh(300_000, now)).toBe(false);
+
+      const steppedUp = session.recordStepUp(now);
+      expect(steppedUp.isStepUpFresh(300_000, now)).toBe(true);
+      expect(steppedUp.isStepUpFresh(300_000, new Date(now.getTime() + 299_999))).toBe(true);
+      expect(steppedUp.isStepUpFresh(300_000, new Date(now.getTime() + 300_001))).toBe(false);
+    });
+  });
 });

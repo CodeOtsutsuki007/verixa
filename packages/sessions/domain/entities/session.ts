@@ -283,6 +283,7 @@ interface SessionProps {
   readonly lastActiveAt: Date;
   readonly expiresAt: Date;
   readonly revokedAt: Date | undefined;
+  readonly stepUpVerifiedAt: Date | undefined;
 }
 
 /** A session plus the one-time raw refresh token issued with it. */
@@ -322,6 +323,7 @@ export class Session {
   readonly lastActiveAt: Date;
   readonly expiresAt: Date;
   readonly revokedAt: Date | undefined;
+  readonly stepUpVerifiedAt: Date | undefined;
 
   private constructor(props: SessionProps) {
     this.id = props.id;
@@ -475,6 +477,7 @@ export class Session {
     this.lastActiveAt = props.lastActiveAt;
     this.expiresAt = props.expiresAt;
     this.revokedAt = props.revokedAt;
+    this.stepUpVerifiedAt = props.stepUpVerifiedAt;
   }
 
   /** SHA-256 of a raw refresh token, hex-encoded. The only form ever persisted. */
@@ -513,6 +516,7 @@ export class Session {
         lastActiveAt: now,
         expiresAt: new Date(now.getTime() + (params.ttlMs ?? DEFAULT_SESSION_TTL_MS)),
         revokedAt: undefined,
+        stepUpVerifiedAt: undefined,
       }),
     };
   }
@@ -589,6 +593,22 @@ export class Session {
     return new Session({ ...this, revokedAt: now });
   }
 
+  /**
+   * Records a successful step-up authentication verification, stamping the current time
+   * to satisfy sensitive action checks within the configured max age.
+   */
+  recordStepUp(now: Date = new Date()): Session {
+    return new Session({ ...this, stepUpVerifiedAt: now });
+  }
+
+  /** Whether the session has a fresh step-up verification within `maxAgeMs` relative to `now`. */
+  isStepUpFresh(maxAgeMs: number, now: Date = new Date()): boolean {
+    if (!this.stepUpVerifiedAt) {
+      return false;
+    }
+    return now.getTime() - this.stepUpVerifiedAt.getTime() <= maxAgeMs;
+  }
+
   /** The refresh token hash is a secret in the same sense a password hash is; it has no business in a log line. */
   toJSON(): Record<string, unknown> {
     return {
@@ -601,6 +621,7 @@ export class Session {
       lastActiveAt: this.lastActiveAt,
       expiresAt: this.expiresAt,
       revokedAt: this.revokedAt,
+      stepUpVerifiedAt: this.stepUpVerifiedAt,
     };
   }
 

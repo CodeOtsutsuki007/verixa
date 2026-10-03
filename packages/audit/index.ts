@@ -13,11 +13,7 @@ export {
 
 // Domain: AuditEvent (Phase 10 structured audit events)
 export { AuditEvent, type AuditEventId } from "./domain/entities/audit-event.js";
-export type {
-  AuditAction,
-  ResourceType,
-  OrganizationId,
-} from "./domain/entities/audit-event.js";
+export type { ResourceType, OrganizationId } from "./domain/entities/audit-event.js";
 export { type AuditAction as AuditActionType } from "./domain/value-objects/audit-action.js";
 export { isAuditAction } from "./domain/value-objects/audit-action.js";
 
@@ -27,6 +23,7 @@ export type {
   AnchorReceiptLike,
   AnchorRecord,
   AnchorRecordRepository,
+  AnchorVerifierPort,
   AuditLogFilters,
   AuditLogRepository,
   FindWithFiltersParams,
@@ -63,16 +60,33 @@ export {
   type QueryAuditEventsFilters,
   type QueryAuditEventsResult,
 } from "./application/use-cases/query-audit-events.js";
+export {
+  DEFAULT_MAX_ANCHOR_CHECKS,
+  DEFAULT_VERIFY_BATCH_SIZE,
+  MAX_VERIFY_BATCH_SIZE,
+  VerifyAuditChain,
+  type AnchorChainCheck,
+  type VerifyAuditChainCommand,
+  type VerifyAuditChainError,
+  type VerifyAuditChainResult,
+} from "./application/use-cases/verify-audit-chain.js";
 
 // Application: subscribers
 export { AuditEventSubscriber } from "./application/subscribers/audit-event-subscriber.js";
+// The event shapes a subscriber handles are part of the public surface: a
+// publisher in another context has to be able to build one, and the
+// composition root's `subscribe` call is generic over it.
 export {
   SessionCreatedAuditSubscriber,
   SessionRevokedAuditSubscriber,
+  type SessionCreatedEvent,
+  type SessionRevokedEvent,
 } from "./application/subscribers/session-audit-subscriber.js";
 export {
-  RoleAssignedAuditSubscriber,
   PermissionGrantedAuditSubscriber,
+  RoleAssignedAuditSubscriber,
+  type PermissionGrantedEvent,
+  type RoleAssignedEvent,
 } from "./application/subscribers/rbac-audit-subscriber.js";
 
 // Infrastructure

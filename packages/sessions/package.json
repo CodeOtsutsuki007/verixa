@@ -14,15 +14,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@verixa/shared-kernel": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^2.1.9",
-    "@verixa/database": "workspace:*",
-    "@verixa/shared-kernel": "workspace:*",
-    "jose": "^5.9.6"
     "@verixa/config": "workspace:*",
+    "@verixa/database": "workspace:*",
     "@verixa/shared-kernel": "workspace:*",
     "ioredis": "^5.11.1",
     "jose": "^6.2.12"
@@ -31,17 +24,6 @@
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "testcontainers": "^12.1.0",
-    "lint": "eslint .",
-    "benchmark": "tsx scripts/benchmark-repositories.ts"
-  },
-  "dependencies": {
-    "@verixa/database": "workspace:*",
-    "@verixa/shared-kernel": "workspace:*"
-  },
-  "devDependencies": {
-    "@testcontainers/postgresql": "^12.1.0",
-    "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^2.1.9",
     "tsx": "^4.23.13",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

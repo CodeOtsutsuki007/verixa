@@ -39,6 +39,11 @@ export class PrismaMfaMethodRepository implements MfaMethodRepository {
     return rows.map(row => MfaMethodMapper.toDomain(row));
   }
 
+  async findAllByUserId(userId: UserId): Promise<MfaMethod[]> {
+    const rows = await this.prisma.mfaMethod.findMany({ where: { userId } });
+    return rows.map(row => MfaMethodMapper.toDomain(row));
+  }
+
   async delete(id: MfaMethodId): Promise<void> {
     await withMappedErrors("MfaMethod", async () => {
       await this.prisma.mfaMethod.delete({ where: { id } });

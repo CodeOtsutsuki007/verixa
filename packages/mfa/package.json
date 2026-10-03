@@ -11,24 +11,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint .",
-    "benchmark": "tsx scripts/benchmark-repositories.ts"
-  },
-  "dependencies": {
-    "@verixa/database": "workspace:*",
-    "@verixa/shared-kernel": "workspace:*"
-  },
-  "devDependencies": {
-    "@testcontainers/postgresql": "^12.1.0",
-    "@types/node": "^22.10.0",
-    "@vitest/coverage-v8": "^2.1.9",
-    "tsx": "^4.23.13",
     "lint": "eslint ."
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
     "@verixa/database": "workspace:*",
-    "@verixa/identity": "workspace:*",
     "@verixa/shared-kernel": "workspace:*"
   },
   "devDependencies": {
