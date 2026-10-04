@@ -148,21 +148,84 @@ export function verificationRequestRepositoryContract(
       await repository.save(newest);
       await repository.save(notYetUnderReview);
 
-      const inReview = await repository.findQueueCandidates({ status: "in_review" });
+      const inReview = await repository.findQueueCandidates({ statuses: ["in_review"] });
       expect(inReview.map((request) => request.id)).toEqual([oldest.id, middle.id, newest.id]);
 
+      // Two statuses in one page: the order is still global by `createdAt`, not
+      // grouped per status, which is what makes a shared `offset` meaningful.
+      const reviewable = await repository.findQueueCandidates({
+        statuses: ["submitted", "in_review"],
+      });
+      expect(reviewable.map((request) => request.id)).toEqual([
+        oldest.id,
+        middle.id,
+        newest.id,
+        notYetUnderReview.id,
+      ]);
+
       const livenessOnly = await repository.findQueueCandidates({
-        status: "in_review",
+        statuses: ["in_review"],
         verificationType: "liveness",
       });
       expect(livenessOnly.map((request) => request.id)).toEqual([middle.id]);
 
       const page = await repository.findQueueCandidates({
-        status: "in_review",
+        statuses: ["in_review"],
         limit: 2,
         offset: 1,
       });
       expect(page.map((request) => request.id)).toEqual([middle.id, newest.id]);
+    });
+
+    it("filters by live claim, treating a lapsed lease as unassigned", async () => {
+      const repository = createRepository();
+      const context = await createContext();
+      const oldest = buildRequest({ context, status: "in_review", offsetMs: 0 });
+      const free = buildRequest({ context, status: "in_review", offsetMs: 5_000 });
+      await repository.save(oldest);
+      await repository.save(free);
+
+      const now = new Date(CONTRACT_EPOCH_MS + 60_000);
+      const outcome = await repository.claimNextInReview({
+        reviewerId: reviewer(),
+        now,
+        claimTtlMs: 30_000,
+        oneAtATime: true,
+      });
+      expect(outcome.kind).toBe("claimed");
+      if (outcome.kind !== "claimed") return;
+      expect(outcome.request.id).toBe(oldest.id);
+
+      const assigned = await repository.findQueueCandidates({
+        statuses: ["in_review"],
+        assignment: "assigned",
+        now,
+      });
+      expect(assigned.map((request) => request.id)).toEqual([oldest.id]);
+
+      const unassigned = await repository.findQueueCandidates({
+        statuses: ["in_review"],
+        assignment: "unassigned",
+        now,
+      });
+      expect(unassigned.map((request) => request.id)).toEqual([free.id]);
+
+      // A minute later the 30s lease has run out, and the claimed row is back in
+      // the queue — nothing cleared its reviewer id, the lease simply lapsed.
+      const afterExpiry = new Date(now.getTime() + 30_001);
+      const stillAssigned = await repository.findQueueCandidates({
+        statuses: ["in_review"],
+        assignment: "assigned",
+        now: afterExpiry,
+      });
+      expect(stillAssigned.map((request) => request.id)).toEqual([]);
+
+      const bothFree = await repository.findQueueCandidates({
+        statuses: ["in_review"],
+        assignment: "unassigned",
+        now: afterExpiry,
+      });
+      expect(bothFree.map((request) => request.id)).toEqual([oldest.id, free.id]);
     });
 
     it("claims the oldest claimable in_review request", async () => {

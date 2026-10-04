@@ -36,7 +36,9 @@ export class InMemoryPolicyRepository implements PolicyRepository {
 
     const applicable = latestVersions.filter(
       (policy) =>
-        policy.target.resourceType === resourceType && policy.target.actions.includes(action),
+        policy.status === "published" &&
+        policy.target.resourceType === resourceType &&
+        policy.target.actions.includes(action),
     );
 
     return Promise.resolve(applicable);

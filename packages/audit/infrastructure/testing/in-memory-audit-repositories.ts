@@ -1,18 +1,28 @@
+import { Result } from "@verixa/shared-kernel";
+
+import type {
+  AuditEventCriteria,
+  AuditEventPage,
+  AuditEventReader,
+} from "../../application/ports/audit-event-reader.js";
 import type {
   AnchorRecord,
   AnchorRecordRepository,
   AuditLogRepository,
   FindWithFiltersParams,
 } from "../../application/ports/audit-log-repository.js";
-import type { AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
+import { ChainConflictError } from "../../application/ports/audit-log-repository.js";
+import { type AuditLogEntry, GENESIS_HASH } from "../../domain/entities/audit-log-entry.js";
 
 /**
  * In-memory `AuditLogRepository` for testing without a database.
  *
- * Enforces the sequence uniqueness the real table enforces with an index.
- * That matters more than usual here: the whole append protocol depends on a
- * duplicate sequence being rejected, and a fake that accepted one would let
- * tests pass against a forked chain that production would have refused.
+ * Enforces the append protocol the real table enforces with an index. That
+ * matters more than usual here: the whole append protocol depends on a
+ * compare-and-set losing, and a fake that accepted a stale `previousHash`
+ * would let tests pass against a forked chain that production would have
+ * refused. The `PrismaAuditLogRepository` and this class are held to the same
+ * behaviour by `auditLogRepositoryContract`.
  */
 export class InMemoryAuditLogRepository implements AuditLogRepository {
   private readonly entries: AuditLogEntry[] = [];
@@ -21,14 +31,59 @@ export class InMemoryAuditLogRepository implements AuditLogRepository {
     return Promise.resolve(this.entries.at(-1));
   }
 
-  append(entry: AuditLogEntry): Promise<void> {
-    if (this.entries.some((existing) => existing.sequence === entry.sequence)) {
-      return Promise.reject(
-        new Error(`An audit entry with sequence ${String(entry.sequence)} already exists.`),
-      );
+  append(
+    entry: AuditLogEntry,
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>> {
+    return this.appendMany([entry], expectedPreviousHash);
+  }
+
+  /**
+   * Appends atomically: either the whole batch lands or none of it does, and
+   * the head is checked exactly once.
+   *
+   * The synchronous body is deliberate — there is no `await` between the check
+   * and the push, so no interleaving can slip between them. JavaScript's
+   * run-to-completion semantics give this fake the serialisation the real
+   * adapter gets from a unique index, which is the closest honest equivalent:
+   * it reproduces the *guarantee*, not the mechanism.
+   */
+  appendMany(
+    entries: readonly AuditLogEntry[],
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>> {
+    if (entries.length === 0) {
+      return Promise.resolve(Result.ok(undefined));
     }
-    this.entries.push(entry);
-    return Promise.resolve();
+
+    const headHash = this.entries.at(-1)?.hash ?? GENESIS_HASH;
+    if (headHash !== expectedPreviousHash) {
+      return Promise.resolve(Result.err(new ChainConflictError(expectedPreviousHash, headHash)));
+    }
+
+    // A duplicate sequence is the same failure the unique index raises in
+    // Postgres, and it must surface as the same conflict here rather than as a
+    // thrown error, so tests against the fake exercise the real retry path.
+    for (const entry of entries) {
+      if (this.entries.some((existing) => existing.sequence === entry.sequence)) {
+        return Promise.resolve(
+          Result.err(
+            new ChainConflictError(entry.previousHash, this.entries.at(-1)?.hash ?? GENESIS_HASH),
+          ),
+        );
+      }
+    }
+
+    let expected = expectedPreviousHash;
+    for (const entry of entries) {
+      if (entry.previousHash !== expected) {
+        return Promise.resolve(Result.err(new ChainConflictError(expected, entry.previousHash)));
+      }
+      expected = entry.hash;
+    }
+
+    this.entries.push(...entries);
+    return Promise.resolve(Result.ok(undefined));
   }
 
   findFrom(fromSequence: number, limit: number): Promise<readonly AuditLogEntry[]> {
@@ -113,5 +168,54 @@ export class InMemoryAnchorRecordRepository implements AnchorRecordRepository {
 
   findAll(limit: number): Promise<readonly AnchorRecord[]> {
     return Promise.resolve([...this.records].reverse().slice(0, limit));
+  }
+}
+
+/**
+ * In-memory `AuditEventReader` for testing without a database.
+ *
+ * Entries are filed under an organization explicitly with {@link seed}, since
+ * `AuditLogEntry` does not carry one yet (Issue 181). Every read is recorded in
+ * {@link reads}, so a test can prove a refused request never reached storage
+ * at all — "returned an error" and "returned an error without looking" are
+ * different guarantees, and only the second one is the point.
+ */
+export class InMemoryAuditEventReader implements AuditEventReader {
+  private readonly entries: { organizationId: string; entry: AuditLogEntry }[] = [];
+  readonly reads: AuditEventCriteria[] = [];
+
+  seed(organizationId: string, ...entries: AuditLogEntry[]): void {
+    for (const entry of entries) this.entries.push({ organizationId, entry });
+  }
+
+  query(criteria: AuditEventCriteria, page: AuditEventPage): Promise<readonly AuditLogEntry[]> {
+    this.reads.push(criteria);
+    return Promise.resolve(
+      this.matching(criteria)
+        .filter((entry) => entry.sequence > (page.afterSequence ?? 0))
+        .slice(0, page.limit),
+    );
+  }
+
+  async *stream(criteria: AuditEventCriteria): AsyncIterable<AuditLogEntry> {
+    this.reads.push(criteria);
+    for (const entry of this.matching(criteria)) {
+      await Promise.resolve();
+      yield entry;
+    }
+  }
+
+  private matching(criteria: AuditEventCriteria): AuditLogEntry[] {
+    return this.entries
+      .filter(({ organizationId }) => organizationId === criteria.organizationId)
+      .map(({ entry }) => entry)
+      .filter(
+        (entry) =>
+          (criteria.actorId === undefined || entry.actorId === criteria.actorId) &&
+          (criteria.subjectId === undefined || entry.subjectId === criteria.subjectId) &&
+          (criteria.from === undefined || entry.occurredAt >= criteria.from) &&
+          (criteria.to === undefined || entry.occurredAt <= criteria.to),
+      )
+      .sort((a, b) => a.sequence - b.sequence);
   }
 }
