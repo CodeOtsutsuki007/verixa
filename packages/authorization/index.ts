@@ -21,7 +21,12 @@ export type {
   AttributeProviderFailure,
   AttributeResolutionResult,
 } from "./application/services/attribute-resolution-pipeline.js";
-export { Policy, type PolicyId, type PolicyTarget } from "./domain/entities/policy.js";
+export {
+  Policy,
+  type PolicyId,
+  type PolicyStatus,
+  type PolicyTarget,
+} from "./domain/entities/policy.js";
 export {
   Condition,
   type AlwaysCondition,
@@ -35,6 +40,7 @@ export type { Effect } from "./domain/value-objects/effect.js";
 export { Rule } from "./domain/value-objects/rule.js";
 export type { PolicyRepository } from "./application/ports/policy-repository.js";
 export { InMemoryPolicyRepository } from "./infrastructure/fakes/in-memory-policy-repository.js";
+export { PrismaPolicyRepository } from "./infrastructure/persistence/prisma-policy-repository.js";
 export type {
   ResourceAttributeResolver,
   ResourceAttributes,

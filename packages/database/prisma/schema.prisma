@@ -138,6 +138,35 @@ enum MembershipStatus {
   @@map("membership_status")
 }
 
+/// Mirrors `PolicyStatus` in packages/authorization/domain/entities/policy.ts.
+enum PolicyLifecycleStatus {
+  draft
+  published
+  archived
+
+  @@map("policy_status")
+}
+
+/// One immutable revision of an authorization policy. The composite primary
+/// key makes each revision addressable while allowing a policy id to have a
+/// durable history of versions.
+model Policy {
+  id           String                @db.Uuid
+  version      Int
+  name         String
+  resourceType String                @map("resource_type")
+  actions      String[]
+  rules        Json
+  dslSource    String?               @map("dsl_source")
+  status       PolicyLifecycleStatus @default(published)
+  createdAt    DateTime              @map("created_at") @db.Timestamptz(3)
+
+  @@id([id, version])
+  @@index([resourceType, id, version(sort: Desc)], map: "policies_resource_type_id_version_idx")
+  @@index([actions], type: Gin, map: "policies_actions_gin_idx")
+  @@map("policies")
+}
+
 /// The multi-tenancy aggregate root. Maps to the `Organization` entity in
 /// packages/identity/domain/entities/organization.ts.
 model Organization {

@@ -14,9 +14,11 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@verixa/database": "workspace:*",
     "@verixa/shared-kernel": "workspace:*"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "ioredis": "^5.11.1",

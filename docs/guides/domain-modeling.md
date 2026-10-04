@@ -391,6 +391,26 @@ existing instance in place. This is what makes append-only version history
 aggregate's own API rather than a rule the repository has to enforce on top
 of a model that would otherwise allow silently rewriting history.
 
+### Persisting policy history (Issue 150)
+
+`PrismaPolicyRepository` stores one `policies` row per `(id, version)` pair.
+The database composite primary key and the repository's insert-only
+`createMany` operation make saving a repeated version idempotent without
+overwriting it. A published change is a new row; historical rows remain
+available to explain earlier authorization decisions and support rollback.
+
+Rules are stored as JSON AST data, alongside the optional DSL source that
+produced them. The AST is what evaluation consumes; keeping the readable
+source as well makes a persisted decision explainable to an operator. The
+resource type and action selector are stored in queryable columns as well,
+with indexes for the authorization lookup path. Storing the whole selector
+only as JSON would remove that targeted query and require loading policy
+history just to find applicable rules.
+
+Policy status is versioned with each row. Only the latest published version
+is returned by `findApplicableTo`; if the latest revision is draft or
+archived, an older published revision does not silently become active again.
+
 ## Sessions and expiry policies (Phase 05, Issue 083)
 
 `Session` (packages/sessions/domain/entities/session.ts) is a stateful

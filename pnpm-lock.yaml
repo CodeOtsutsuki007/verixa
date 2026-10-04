@@ -139,10 +139,16 @@ importers:
 
   packages/authorization:
     dependencies:
+      '@verixa/database':
+        specifier: workspace:*
+        version: link:../database
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
     devDependencies:
+      '@testcontainers/postgresql':
+        specifier: ^12.1.0
+        version: 12.2.0(supports-color@7.2.0)
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.4
