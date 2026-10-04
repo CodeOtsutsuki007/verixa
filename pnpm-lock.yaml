@@ -379,14 +379,37 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.20.5)(supports-color@7.2.0)
 
+  packages/shared-kernel:
+    dependencies:
+      pino:
+        specifier: ^9.6.0
+        version: 9.14.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.5
+      '@vitest/coverage-v8':
+        specifier: ^2.1.9
+        version: 2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.5)(supports-color@7.2.0))
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.5)(supports-color@7.2.0)
+
   packages/mfa:
     dependencies:
+      '@stellar/stellar-sdk':
+        specifier: ^16.2.0
+        version: 16.3.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
       '@verixa/shared-kernel':
         specifier: workspace:*
         version: link:../shared-kernel
     devDependencies:
       '@types/node':
         specifier: ^22.10.0
+        version: 22.20.5
         version: 22.20.1
       '@vitest/coverage-v8':
         specifier: ^2.1.9
@@ -409,16 +432,19 @@ importers:
         version: 22.20.4
       '@vitest/coverage-v8':
         specifier: ^2.1.9
-        version: 2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.4)(supports-color@7.2.0))
+        version: 2.1.9(supports-color@7.2.0)(vitest@2.1.9(@types/node@22.20.5)(supports-color@7.2.0))
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
       vitest:
         specifier: ^2.1.8
-        version: 2.1.9(@types/node@22.20.4)(supports-color@7.2.0)
+        version: 2.1.9(@types/node@22.20.5)(supports-color@7.2.0)
 
   packages/stellar-anchor:
     dependencies:
+      '@verixa/database':
+        specifier: workspace:*
+        version: link:../database
       '@stellar/stellar-sdk':
         specifier: ^16.2.0
         version: 16.3.1(debug@4.4.3(supports-color@7.2.0))(supports-color@7.2.0)
