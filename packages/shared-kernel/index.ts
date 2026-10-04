@@ -16,6 +16,7 @@ export {
   ValidationError,
 } from "./domain/errors.js";
 export { Result } from "./domain/result.js";
+export { InMemoryEventPublisher } from "./infrastructure/in-memory-event-publisher.js";
 export { createLogger } from "./infrastructure/logger.js";
 export type { CreateLoggerOptions, Logger } from "./infrastructure/logger.js";
 export {
@@ -23,3 +24,10 @@ export {
   TENANT_CONTEXT_MECHANISM,
   TENANT_CONTEXT_SETTING,
 } from "./infrastructure/tenant-context.js";
+export { NoopRateLimiter } from "./infrastructure/adapters/noop-rate-limiter.js";
+export {
+  RateLimitExceededError,
+  type RateLimitKey,
+  type RateLimitResult,
+  type RateLimiter,
+} from "./application/ports/rate-limiter.js";

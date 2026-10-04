@@ -1,4 +1,26 @@
 import type { Id } from "@verixa/shared-kernel";
+
+import type { MfaMethodRepository } from "../../application/ports/mfa-method-repository.js";
+import type { MfaMethod, MfaMethodId } from "../../domain/entities/mfa-method.js";
+
+export class InMemoryMfaMethodRepository implements MfaMethodRepository {
+  private readonly methods = new Map<string, MfaMethod>();
+
+  save(method: MfaMethod): Promise<void> {
+    this.methods.set(method.id, method);
+    return Promise.resolve();
+  }
+
+  findById(id: MfaMethodId): Promise<MfaMethod | null> {
+    return Promise.resolve(this.methods.get(id) ?? null);
+  }
+
+  findByUserId(userId: Id<"UserId">): Promise<MfaMethod[]> {
+    return Promise.resolve(Array.from(this.methods.values()).filter((m) => m.userId === userId));
+  }
+
+  clear(): void {
+    this.methods.clear();
 import type { MfaMethod, MfaMethodId } from "../../domain/entities/mfa-method.js";
 import type { MfaMethodRepository } from "../../application/ports/mfa-method-repository.js";
 
@@ -20,16 +42,21 @@ export class InMemoryMfaMethodRepository implements MfaMethodRepository {
 
   findActiveByUserId(userId: Id<"UserId">): Promise<MfaMethod[]> {
     const activeMethods = Array.from(this.methodsById.values()).filter(
-      (m) => m.userId === userId && m.status === "active"
+      (m) => m.userId === userId && m.status === "active",
     );
     return Promise.resolve(activeMethods);
   }
 
   findPendingByUserId(userId: Id<"UserId">): Promise<MfaMethod[]> {
     const pendingMethods = Array.from(this.methodsById.values()).filter(
-      (m) => m.userId === userId && m.status === "pending"
+      (m) => m.userId === userId && m.status === "pending",
     );
     return Promise.resolve(pendingMethods);
+  }
+
+  findAllByUserId(userId: Id<"UserId">): Promise<MfaMethod[]> {
+    const methods = Array.from(this.methodsById.values()).filter((m) => m.userId === userId);
+    return Promise.resolve(methods);
   }
 
   delete(id: MfaMethodId): Promise<void> {

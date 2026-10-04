@@ -29,6 +29,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
+      # Backs the sessions revocation deny-list integration tests (Issue 088) —
+      # a real Redis, so "does revoke/isRevoke/TTL-expiry behave against the
+      # actual store" is answered by the store, not a fake. Same rationale and
+      # localhost reachability as the Postgres service above.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     env:
       TEST_DATABASE_URL: postgres://verixa:verixa@localhost:5432/verixa_test
       # Prisma reads DATABASE_URL for both `generate` and `migrate` (Issue
@@ -42,6 +55,13 @@ jobs:
       # container would make every such test skip and still report success.
       # This flag turns "no database" into a hard failure in CI only.
       REQUIRE_DATABASE_TESTS: "1"
+      # Points the sessions Redis integration tests at the service container.
+      TEST_REDIS_URL: redis://localhost:6379
+      # Same reasoning as REQUIRE_DATABASE_TESTS: Redis-backed tests skip
+      # themselves when no Redis is reachable, which is right locally and wrong
+      # here — a misconfigured service container would make them skip and still
+      # report green. This turns "no Redis" into a hard failure in CI only.
+      REQUIRE_REDIS_TESTS: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -147,6 +167,24 @@ jobs:
       - name: Identity coverage gate
         run: pnpm --filter @verixa/identity run test:coverage
 
+      # packages/credentials is the second fully-built bounded context,
+      # following the Phase 02 coverage-gate pattern established in Issue 037.
+      # Enforced separately from the plain `pnpm test` above to keep coverage
+      # collection overhead isolated to contexts that require it.
+      - name: Credentials coverage gate
+        run: pnpm --filter @verixa/credentials run test:coverage
+
+      # packages/audit is the third context under the Phase 02 coverage-gate
+      # pattern (Issue 037), applied in Issue 197. The floor matters more here
+      # than anywhere else in the monorepo: this is the code that decides
+      # whether tampering is *detectable*, and an untested branch in chain
+      # verification is a security property that silently does not hold. The
+      # gate excludes the Prisma adapters and the operator CLI for the reason
+      # stated in packages/audit/vitest.config.ts — they need a live Postgres,
+      # and are covered by the database-backed suite instead.
+      - name: Audit coverage gate
+        run: pnpm --filter @verixa/audit run test:coverage
+
   # Verifies the *other* database strategy. The `ci` job above points
   # TEST_DATABASE_URL at a service container, so it never exercises the
   # Testcontainers path in database-harness.ts (Issue 047). This job
@@ -200,10 +238,13 @@ jobs:
       - name: Re-link workspace packages
         run: pnpm install --frozen-lockfile
 
-      # Only the identity package: it owns the Prisma repository contract
-      # suite, which is what actually needs a database here.
-      - name: Run repository contract tests against a Testcontainers Postgres
+      # These packages own Prisma repository contract suites that need a
+      # real database.
+      - name: Run identity repository contract tests against Testcontainers Postgres
         run: pnpm --filter @verixa/identity run test
+
+      - name: Run authorization repository contract tests against Testcontainers Postgres
+        run: pnpm --filter @verixa/authorization run test
 
   # Verifies the *compose* stack's database roles, which nothing else covers.
   #
