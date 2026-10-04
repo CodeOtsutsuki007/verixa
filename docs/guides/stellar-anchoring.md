@@ -65,12 +65,29 @@ better, particularly in a security-critical subsystem.
 ## Usage
 
 ```ts
-import { StellarHashAnchor } from "@verixa/stellar-anchor";
+import {
+  KmsTransactionSigner,
+  LocalTransactionSigner,
+  StellarHashAnchor,
+} from "@verixa/stellar-anchor";
 
-const anchor = new StellarHashAnchor({
-  secretKey: process.env.STELLAR_ANCHOR_SECRET_KEY,
-  network: "testnet", // or "public"
-});
+// Development and testnet: the key is in this process's environment.
+const anchorSecretKey = process.env.STELLAR_ANCHOR_SECRET_KEY;
+if (anchorSecretKey === undefined) {
+  throw new Error("STELLAR_ANCHOR_SECRET_KEY is not set");
+}
+const signer = new LocalTransactionSigner(anchorSecretKey);
+
+// Production: the key never enters this process. `kmsClient` is the seam in
+// `infrastructure/signing/kms-sign-client.ts` — implement it over your cloud
+// KMS/HSM SDK and pass it here.
+// const signer = new KmsTransactionSigner({
+//   client,                    // your KmsSignClient over the cloud SDK
+//   keyId: "alias/verixa-anchor",
+//   accountId: "G...",         // the account that key signs for
+// });
+
+const anchor = new StellarHashAnchor({ signer, network: "testnet" }); // or "public"
 
 const result = await anchor.anchor(chainTipHash);
 // Result.ok({ hash, anchorRef, anchoredAt, network })
@@ -84,17 +101,36 @@ Both methods return `Result` rather than throwing: a scheduled anchoring job
 that can't reach the ledger should log and retry on the next tick, not
 crash. See [`error-handling.md`](./error-handling.md).
 
+The `signer` is optional, and omitting it is meaningful rather than a
+default: you get an adapter that can `verify` and refuses to `anchor`. The
+two halves have different credential needs — verification reads public
+ledger data and should work with nothing configured at all.
+
+Where signing happens is a deployment decision, taken through
+`TransactionSigner` rather than here. See
+[`stellar-key-management.md`](../security/stellar-key-management.md) for why
+a key in the process environment was removed as the only option.
+
 ### From the command line
 
 ```bash
-# Anchor (needs a funded account)
-STELLAR_ANCHOR_SECRET_KEY=S... STELLAR_NETWORK=testnet \
+# Anchor (needs a funded account, and is a development path — see below)
+STELLAR_ANCHOR_SECRET_KEY=... STELLAR_NETWORK=testnet \
   pnpm --filter @verixa/stellar-anchor anchor <sha256-hex>
 
 # Verify — no credentials, no funded account, reads public ledger data only
 STELLAR_NETWORK=testnet \
   pnpm --filter @verixa/stellar-anchor anchor verify <sha256-hex> <tx-hash>
+
+# Balance — one funding check, for a monitor or a cron job
+STELLAR_NETWORK=testnet STELLAR_ANCHOR_PUBLIC_KEY=G... \
+  pnpm --filter @verixa/stellar-anchor anchor balance
 ```
+
+The CLI reads the key from the environment because a testnet experiment
+should not require a KMS. It refuses to sign on the public network unless
+`STELLAR_ALLOW_LOCAL_SIGNING=1` says otherwise. Production anchoring goes
+through the API's composition root, where a KMS-backed signer is wired.
 
 The verification half is the point. An integrity guarantee only the operator
 can check isn't much of a guarantee — an auditor, a regulator, or a
@@ -162,6 +198,18 @@ Enabling anchoring in production needs:
 - **A funded Stellar account.** Fees are negligible (100 stroops, or
   0.00001 XLM, per transaction — anchoring hourly costs a fraction of a
   cent per year), but the account must exist and stay funded.
+- **A key-management story.** The anchoring key signs transactions that spend
+  from a real account and mint publicly-verifiable claims, so whoever holds
+  it can drain that account and forge anchors. `STELLAR_ANCHOR_SECRET_KEY`
+  (via `LocalTransactionSigner`) is the development path; production is
+  expected to wire a `KmsTransactionSigner` through
+  `STELLAR_SIGNING_BACKEND=kms`, so the private half never exists in this
+  process. See
+  [`stellar-key-management.md`](../security/stellar-key-management.md), and
+  for the mainnet-specific steps
+  [`stellar-mainnet-cutover.md`](../runbooks/stellar-mainnet-cutover.md).
+  cent per year), but the account must exist and stay funded. See
+  **Funding monitor** below for the mechanism that tells you when it isn't.
 - **A key-management story.** `STELLAR_ANCHOR_SECRET_KEY` is a real secret:
   anyone holding it can drain the account and forge anchors. It belongs in
   a secrets manager, never in the repository, and never in a log line.
@@ -172,12 +220,95 @@ Enabling anchoring in production needs:
   undetected by external anchoring specifically. This is a genuine
   trade-off with no universally correct answer.
 
+### Funding monitor
+
+Issue 190C. An anchor that cannot pay its fee stops committing, and the
+commitment is the only part of the design that catches a rewritten chain. The
+failure is quiet in a specific way: nothing user-facing breaks, the audit log
+keeps growing and verifying locally, and the exposure shows up months later as
+a gap between the last anchored digest and the head someone is asked to prove.
+
+`AnchorBalanceMonitor` turns that into a number and an alert.
+
+```bash
+# One check. Prints a single JSON metric line on stdout, alerts on stderr.
+STELLAR_NETWORK=testnet STELLAR_ANCHOR_PUBLIC_KEY=G... \
+  pnpm --filter @verixa/stellar-anchor anchor balance
+```
+
+Exit codes are chosen for a monitoring system rather than a human: `0` funded,
+`1` below the alert threshold, `2` underfunded-below-fee, unreadable, or
+unreachable. The public key is enough — a balance check never needs the secret,
+which is what lets the monitoring side run with a different credential than the
+signing side.
+
+The metric carries both `valueXlm` and `availableStroops`. A gauge that
+subtracts the reserve from the balance and compares it against a floating-point
+XLM figure is how an operator ends up with a dashboard that says "funded" and a
+ledger that says "insufficient balance"; the integer is the fact and the XLM
+number is a rendering of it.
+
+In-process wiring, which is the half that actually prevents the incident:
+
+```ts
+const monitor = new AnchorBalanceMonitor({
+  reader: new HorizonAccountBalanceReader("https://horizon-testnet.stellar.org"),
+  publicKey: process.env["STELLAR_ANCHOR_PUBLIC_KEY"]!,
+  thresholdXlm: 1,
+  alerter: loggingFundingAlerter(logger),
+});
+
+// Poll on the operator's cadence; the returned function stops it.
+const stop = monitor.start(15 * 60_000, (error) => logger.error({ err: error }));
+
+const anchor = new StellarHashAnchor({ ..., fundingGuard: monitor });
+```
+
+Passing the monitor as `fundingGuard` is what makes the check load-bearing:
+`StellarHashAnchor` asks the guard before submitting, and returns the guard's
+refusal unchanged rather than discovering the problem from a ledger rejection.
+The guard also _learns_ from rejections — `isUnderfundedLedgerError` recognises
+an `insufficient balance` result, which outranks the last cached reading until a
+poll sees funds again, so a drained account alerts immediately rather than at
+the next scheduled check.
+
+Two behaviours worth knowing before you rely on this:
+
+- **Alerts deduplicate by kind.** The same condition pages once, and re-alerts
+  only after a `recovered` or a change of severity. A gauge that fires every
+  five minutes for one condition trains operators to ignore it, which is
+  functionally the silent failure the monitor exists to close.
+- **The metric is emitted on every check, including failures.** A missing data
+  point cannot be told apart from a healthy account, so an unreadable balance
+  reports `fundable: false` rather than reporting nothing.
+
+Threshold choice is a decision about how long you want to notice. The default
+is 1 XLM — roughly 100,000 anchoring transactions — because the cost of being
+wrong in the generous direction is one number on a dashboard, and the cost of
+being wrong in the tight direction is the gap described above.
+
 ## Status
 
-The adapter, the port, the in-memory fake, the shared contract suite, and
-the CLI are implemented and tested against the live Stellar testnet.
+The adapter, the port, the in-memory fake, the shared contract suites
+(`HashAnchor` and `TransactionSigner`), and the CLI are implemented, and the
+Stellar mechanics are tested against the live testnet.
 
-What's **not** built yet is the consumer: `packages/audit` doesn't exist
-until Phase 10, so nothing currently produces a hash chain to anchor. The
-scheduled job that anchors a chain tip periodically, and the extension of
-`VerifyAuditChain` to check anchors, land with that phase.
+On the consuming side, `packages/audit` now exists: `AnchorAuditLog` anchors
+a hash chain and records the receipt, and `pnpm --filter @verixa/audit demo`
+runs the whole path end to end against testnet.
+
+What's **not** built is the scheduler. Nothing calls `AnchorAuditLog` on an
+interval — the deployment that wants periodic anchoring runs it from its own
+cron, and `AnchorAuditLog` is written to be safe to invoke that way. Deciding
+the interval is an operator's call, not a library default; see the trade-off
+above.
+The adapter, the port, the in-memory fake, the shared contract suite, the CLI,
+and the funding monitor are implemented and tested against the live Stellar
+testnet.
+
+The consumer exists now: `packages/audit` builds the chain, and
+`AnchorAuditLog` commits a head through the `HashAnchorPort` — structurally
+satisfied by `StellarHashAnchor` without the audit package depending on it.
+What remains is the scheduled tip-anchoring job and extending chain
+verification to check receipts against the ledger, plus mainnet readiness
+(roadmap 190B key management and 190D cutover runbook).

@@ -8,7 +8,7 @@ import {
   RequestPasswordReset,
 } from "@verixa/credentials";
 import { PrismaUserRepository, RegisterUser, UserStatusChanged } from "@verixa/identity";
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createTestPrismaClient, databaseAvailability } from "./helpers/database.js";
@@ -23,9 +23,17 @@ describe.skipIf(!available)("Credential cleanup on user deletion (Issue 075)", (
   const userRepo = new PrismaUserRepository(prisma);
   const registerUser = new RegisterUser(userRepo);
   const credentialsUnitOfWork = new PrismaCredentialsUnitOfWork(prisma);
-  const registerUserWithPassword = new RegisterUserWithPassword(credentialsUnitOfWork, hasher);
+  const registerUserWithPassword = new RegisterUserWithPassword(
+    credentialsUnitOfWork,
+    hasher,
+    new NoopRateLimiter(),
+  );
   const requestEmailVerification = new RequestEmailVerification(credentialsUnitOfWork, notifier);
-  const requestPasswordReset = new RequestPasswordReset(credentialsUnitOfWork, notifier);
+  const requestPasswordReset = new RequestPasswordReset(
+    credentialsUnitOfWork,
+    notifier,
+    new NoopRateLimiter(),
+  );
   const handler = new HandleUserDeleted(credentialsUnitOfWork);
 
   beforeAll(async () => {
@@ -179,7 +187,11 @@ describe.skipIf(!available)("Credential cleanup on user deletion (Issue 075)", (
 
     expect(consumedAtFirstCall).toBeNull();
     expect(consumedAfterFirstCall).not.toBeNull();
-    expect(consumedAfterSecondCall).toBe(consumedAfterFirstCall);
+    // toStrictEqual, not toBe: these are two Date objects read back from
+    // separate queries, so they are equal in value and never the same
+    // instance. The point of the assertion is that the timestamp did not move
+    // on the second call, which is about value.
+    expect(consumedAfterSecondCall).toStrictEqual(consumedAfterFirstCall);
   });
 
   it("should ignore non-deletion status transitions", async () => {
