@@ -46,13 +46,13 @@ evaluation in data literals.
 
 From highest to lowest precedence:
 
-| Precedence | Operators | Associativity |
-| --- | --- | --- |
-| 1 | parentheses, function calls, attribute access | left to right |
-| 2 | `not` | right to left |
-| 3 | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `contains`, `matches` | non-associative; chain comparisons with `and` |
-| 4 | `and` | left to right |
-| 5 | `or` | left to right |
+| Precedence | Operators                                                     | Associativity                                 |
+| ---------- | ------------------------------------------------------------- | --------------------------------------------- |
+| 1          | parentheses, function calls, attribute access                 | left to right                                 |
+| 2          | `not`                                                         | right to left                                 |
+| 3          | `==`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `contains`, `matches` | non-associative; chain comparisons with `and` |
+| 4          | `and`                                                         | left to right                                 |
+| 5          | `or`                                                          | left to right                                 |
 
 `and` binds more tightly than `or`, so `a or b and c` means `a or (b and c)`.
 Comparisons do not chain: `a < b < c` is invalid. Use
@@ -67,12 +67,12 @@ containment, and matching with incompatible types evaluate false.
 An attribute reference is `bag.name` or a nested path such as
 `resource.owner.id`:
 
-| Bag | Meaning | Typical values |
-| --- | --- | --- |
-| `subject` | Principal making the request | `id`, `orgId`, `roles`, `emailVerified` |
-| `resource` | Object being accessed | `ownerId`, `orgId`, `status`, `availableFrom` |
-| `action` | Operation being requested | `name`, `resource`, `method` |
-| `environment` | Request and execution context | `now`, `ip`, `userAgent`, `requestId` |
+| Bag           | Meaning                       | Typical values                                |
+| ------------- | ----------------------------- | --------------------------------------------- |
+| `subject`     | Principal making the request  | `id`, `orgId`, `roles`, `emailVerified`       |
+| `resource`    | Object being accessed         | `ownerId`, `orgId`, `status`, `availableFrom` |
+| `action`      | Operation being requested     | `name`, `resource`, `method`                  |
+| `environment` | Request and execution context | `now`, `ip`, `userAgent`, `requestId`         |
 
 All bags are typed maps. Supported values are strings, finite numbers,
 booleans, dates, arrays, and nested records made from those values. Looking up
@@ -125,6 +125,7 @@ Each example is a complete policy expression after the `if` keyword.
 These examples use `environment.now` and other request facts as explicit
 attributes. This keeps decisions reproducible in tests and audit replays: the
 same context always produces the same result.
+
 # Policy DSL Grammar
 
 This document is the reference for `packages/authorization`'s ABAC policy

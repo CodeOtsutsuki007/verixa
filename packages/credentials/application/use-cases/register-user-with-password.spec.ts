@@ -1,4 +1,4 @@
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { Argon2PasswordHasher } from "../../infrastructure/argon2-password-hasher.js";
@@ -23,7 +23,7 @@ describe("RegisterUserWithPassword", () => {
 
   beforeEach(() => {
     unitOfWork = new InMemoryCredentialsUnitOfWork();
-    useCase = new RegisterUserWithPassword(unitOfWork, hasher);
+    useCase = new RegisterUserWithPassword(unitOfWork, hasher, new NoopRateLimiter());
   });
 
   it("creates both a user and a credential", async () => {

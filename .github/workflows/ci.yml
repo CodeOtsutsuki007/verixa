@@ -174,6 +174,17 @@ jobs:
       - name: Credentials coverage gate
         run: pnpm --filter @verixa/credentials run test:coverage
 
+      # packages/audit is the third context under the Phase 02 coverage-gate
+      # pattern (Issue 037), applied in Issue 197. The floor matters more here
+      # than anywhere else in the monorepo: this is the code that decides
+      # whether tampering is *detectable*, and an untested branch in chain
+      # verification is a security property that silently does not hold. The
+      # gate excludes the Prisma adapters and the operator CLI for the reason
+      # stated in packages/audit/vitest.config.ts — they need a live Postgres,
+      # and are covered by the database-backed suite instead.
+      - name: Audit coverage gate
+        run: pnpm --filter @verixa/audit run test:coverage
+
   # Verifies the *other* database strategy. The `ci` job above points
   # TEST_DATABASE_URL at a service container, so it never exercises the
   # Testcontainers path in database-harness.ts (Issue 047). This job

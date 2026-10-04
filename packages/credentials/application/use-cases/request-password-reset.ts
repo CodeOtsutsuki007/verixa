@@ -1,6 +1,5 @@
 import { Email } from "@verixa/identity";
-import { Result, type ValidationError } from "@verixa/shared-kernel";
-import type { RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
+import { Result, type ValidationError, RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
 
 import { PasswordResetToken } from "../../domain/entities/password-reset-token.js";
 import type { CredentialNotifier } from "../ports/credential-notifier.js";

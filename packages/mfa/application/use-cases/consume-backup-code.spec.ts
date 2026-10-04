@@ -32,7 +32,9 @@ describe("ConsumeBackupCode", () => {
     expect(hashes).not.toContain(generation.hashedCodes[0]);
     expect(hashes).toContain(generation.hashedCodes[1]);
 
-    expect(auditLogger.record).toHaveBeenCalledWith("backup_code.consumed", userId, { remaining: "1" });
+    expect(auditLogger.record).toHaveBeenCalledWith("backup_code.consumed", userId, {
+      remaining: "1",
+    });
   });
 
   it("rejects an invalid code", async () => {

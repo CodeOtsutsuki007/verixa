@@ -1,6 +1,7 @@
 import type { DomainEvent } from "@verixa/shared-kernel";
 
 import type { RecordAuditEventCommand } from "../use-cases/record-audit-event.js";
+
 import { AuditEventSubscriber } from "./audit-event-subscriber.js";
 
 /**
@@ -10,7 +11,7 @@ import { AuditEventSubscriber } from "./audit-event-subscriber.js";
  * When the sessions package publishes this event, this subscriber will
  * automatically record it in the audit log.
  */
-interface SessionCreatedEvent extends DomainEvent {
+export interface SessionCreatedEvent extends DomainEvent {
   readonly eventName: "sessions.session.created";
   readonly userId: string;
   readonly sessionId: string;
@@ -25,7 +26,7 @@ interface SessionCreatedEvent extends DomainEvent {
  * When the sessions package publishes this event, this subscriber will
  * automatically record it in the audit log.
  */
-interface SessionRevokedEvent extends DomainEvent {
+export interface SessionRevokedEvent extends DomainEvent {
   readonly eventName: "sessions.session.revoked";
   readonly userId: string;
   readonly sessionId: string;

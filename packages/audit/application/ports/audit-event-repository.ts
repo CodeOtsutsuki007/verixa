@@ -142,10 +142,7 @@ export interface AuditEventRepository {
    * @param pagination - Pagination parameters
    * @returns Paginated result set
    */
-  query(
-    filters: AuditEventFilters,
-    pagination: PaginationParams,
-  ): Promise<PaginatedAuditEvents>;
+  query(filters: AuditEventFilters, pagination: PaginationParams): Promise<PaginatedAuditEvents>;
 
   /**
    * Retrieves a range of events for a given organization in sequence order.

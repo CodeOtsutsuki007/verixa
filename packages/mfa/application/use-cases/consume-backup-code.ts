@@ -9,7 +9,7 @@ export interface ConsumeBackupCodeCommand {
   readonly code: string;
 }
 
-export type ConsumeBackupCodeOutcome = 
+export type ConsumeBackupCodeOutcome =
   | { readonly kind: "ok"; readonly codesRemaining: number }
   | { readonly kind: "exhausted" }
   | { readonly kind: "failed" };
@@ -19,19 +19,19 @@ export type ConsumeBackupCodeResult = Result<ConsumeBackupCodeOutcome, Error>;
 export class ConsumeBackupCode {
   constructor(
     private readonly mfaMethodRepository: MfaMethodRepository,
-    private readonly auditLogger: AuditLogger
+    private readonly auditLogger: AuditLogger,
   ) {}
 
   async execute(command: ConsumeBackupCodeCommand): Promise<ConsumeBackupCodeResult> {
     const userId = command.userId as UserId;
 
     const activeMethods = await this.mfaMethodRepository.findActiveByUserId(userId);
-    const backupMethod = activeMethods.find(m => m.type === "backup_codes");
+    const backupMethod = activeMethods.find((m) => m.type === "backup_codes");
 
     if (!backupMethod || !backupMethod.secret) {
-      // Intentionally taking the same time as a failure? 
-      // Actually we should burn time here to prevent timing attacks, 
-      // but without a decoy hash, we can't easily burn time. 
+      // Intentionally taking the same time as a failure?
+      // Actually we should burn time here to prevent timing attacks,
+      // but without a decoy hash, we can't easily burn time.
       // For now we'll just fail.
       return Result.ok({ kind: "failed" });
     }
@@ -62,12 +62,14 @@ export class ConsumeBackupCode {
 
     // Match found. Consume the code by removing its hash.
     hashes.splice(matchedIndex, 1);
-    
+
     // Update the record with the remaining hashes.
     backupMethod.updateSecret(JSON.stringify(hashes));
     await this.mfaMethodRepository.save(backupMethod);
 
-    await this.auditLogger.record("backup_code.consumed", userId, { remaining: hashes.length.toString() });
+    await this.auditLogger.record("backup_code.consumed", userId, {
+      remaining: hashes.length.toString(),
+    });
 
     if (hashes.length === 0) {
       return Result.ok({ kind: "exhausted" });

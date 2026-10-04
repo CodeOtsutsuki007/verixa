@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { utf8ByteLength } from "../value-objects/audit-metadata.js";
+
 import { AuditLogEntry, GENESIS_HASH, verifyChain } from "./audit-log-entry.js";
 
 function chainOf(length: number): AuditLogEntry[] {
@@ -167,5 +169,138 @@ describe("verifyChain", () => {
     const rewritten = chainOf(3);
 
     expect(verifyChain(rewritten)).toBeUndefined();
+  });
+
+  describe("canonical form", () => {
+    // The hash is only a commitment to *this entry* if nothing inside a field
+    // can be read as framing. These are the collisions the newline-joined
+    // pre-image allowed; each pair is two different facts.
+    const shape = {
+      action: "user.login_succeeded" as const,
+      occurredAt: new Date(1_700_000_000_000),
+    };
+
+    it("does not let a newline move the boundary between actorId and subjectId", () => {
+      const split = AuditLogEntry.append({
+        ...shape,
+        actorId: "a\nb",
+        subjectId: "c",
+      });
+      const joined = AuditLogEntry.append({
+        ...shape,
+        actorId: "a",
+        subjectId: "b\nc",
+      });
+
+      expect(split.hash).not.toBe(joined.hash);
+    });
+
+    it("does not let a separator inside a metadata value shift a pair boundary", () => {
+      // Same trick, one layer down: with a naive `key=value` join, two pairs and
+      // one pair whose value contains the framing come out identically.
+      const twoPairs = AuditLogEntry.append({
+        ...shape,
+        actorId: "actor",
+        metadata: { a: "b", c: "d" },
+      });
+      const onePair = AuditLogEntry.append({
+        ...shape,
+        actorId: "actor",
+        metadata: { a: "b;c=d" },
+      });
+
+      expect(twoPairs.hash).not.toBe(onePair.hash);
+    });
+
+    it("does not let the action absorb the following fields", () => {
+      const a = AuditLogEntry.append({
+        action: `user.login_succeeded\nactor-1` as AuditLogEntry["action"],
+        actorId: "x",
+        occurredAt: shape.occurredAt,
+      });
+      const b = AuditLogEntry.append({
+        ...shape,
+        actorId: "actor-1\nx",
+      });
+
+      expect(a.hash).not.toBe(b.hash);
+    });
+
+    it("hashes the same content regardless of metadata insertion order", () => {
+      const sorted = AuditLogEntry.append({
+        ...shape,
+        metadata: { a: "1", b: "2" },
+      });
+      const reversed = AuditLogEntry.append({
+        ...shape,
+        metadata: { b: "2", a: "1" },
+      });
+
+      expect(sorted.hash).toBe(reversed.hash);
+    });
+
+    it("keeps a metadata-free entry distinct from one with an empty-string value", () => {
+      const absent = AuditLogEntry.append({ ...shape, metadata: {} });
+      const present = AuditLogEntry.append({ ...shape, metadata: { k: "" } });
+
+      expect(absent.hash).not.toBe(present.hash);
+    });
+
+    it("is stable for multi-byte content, which a character count would not be", () => {
+      // The declared lengths are UTF-8 byte lengths, so the pre-image can be
+      // re-derived from the stored columns by something that is not this
+      // runtime. A JavaScript `.length` counts UTF-16 code units, and the two
+      // disagree on anything outside ASCII — an emoji is 2 units and 4 bytes.
+      const entry = AuditLogEntry.append({
+        ...shape,
+        metadata: { note: "café 👍" },
+      });
+
+      expect(entry.hasValidHash).toBe(true);
+      expect(utf8ByteLength("café 👍")).toBe(10);
+    });
+  });
+
+  describe("toLogFields", () => {
+    it("renders one entry as text that cannot end a record early", () => {
+      const entry = AuditLogEntry.append({
+        action: "user.login_failed",
+        actorId: "attacker\n[2026-10-02] INFO audit: admin login granted",
+        metadata: { reason: "bad password\r\nsecond line" },
+      });
+
+      const fields = entry.toLogFields();
+
+      for (const value of Object.values(fields)) {
+        // eslint-disable-next-line no-control-regex -- asserting their absence is the test.
+        expect(value).not.toMatch(/[\r\n\u0000-\u0008\u000b\u000c\u000e-\u001f]/u);
+      }
+      expect(fields.actorId).toContain("\\n");
+      // The content itself is unchanged in storage, so the digest still matches.
+      expect(entry.hasValidHash).toBe(true);
+    });
+
+    it("keeps the metadata field parseable as the JSON it claims to be", () => {
+      // A double escape pass is the mistake to guard against: running the text
+      // escaper over a JSON document escapes the backslashes the document uses
+      // for its own escaping, and the result is neither JSON nor the value.
+      const metadata = {
+        quote: 'a"b',
+        backslash: "a\\b",
+        newline: "a\nb",
+        control: "\u0007\u0085\u2028\u2029",
+        unicode: "café 👍",
+      };
+      const entry = AuditLogEntry.append({
+        action: "user.login_failed",
+        metadata,
+      });
+
+      const field = entry.toLogFields().metadata ?? "";
+
+      // eslint-disable-next-line no-control-regex -- asserting their absence is the test.
+      expect(field).not.toMatch(/[\u0000-\u001f\u0085\u2028\u2029]/u);
+      expect(JSON.parse(field)).toEqual(metadata);
+    });
   });
 });

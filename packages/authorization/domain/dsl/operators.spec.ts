@@ -26,8 +26,14 @@ describe("policy DSL operators", () => {
   it("supports membership and string/array containment", () => {
     expect(evaluateOperator("in", "read", ["read", "write"])).toEqual({ ok: true, value: true });
     expect(evaluateOperator("contains", "document", "doc")).toEqual({ ok: true, value: true });
-    expect(evaluateOperator("contains", ["reader", "admin"], "admin")).toEqual({ ok: true, value: true });
-    expect(evaluateOperator("in", "read", "read,write")).toEqual({ ok: false, reason: "type_mismatch" });
+    expect(evaluateOperator("contains", ["reader", "admin"], "admin")).toEqual({
+      ok: true,
+      value: true,
+    });
+    expect(evaluateOperator("in", "read", "read,write")).toEqual({
+      ok: false,
+      reason: "type_mismatch",
+    });
   });
 
   it("matches regular expressions and reports malformed patterns", () => {
@@ -35,7 +41,10 @@ describe("policy DSL operators", () => {
       ok: true,
       value: true,
     });
-    expect(evaluateOperator("matches", "abc", "[")).toEqual({ ok: false, reason: "invalid_pattern" });
+    expect(evaluateOperator("matches", "abc", "[")).toEqual({
+      ok: false,
+      reason: "invalid_pattern",
+    });
   });
 
   it("makes missing values fail closed, even for inequality", () => {

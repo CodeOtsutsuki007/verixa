@@ -10,12 +10,14 @@ import {
 } from "@stellar/stellar-sdk";
 import { Result } from "@verixa/shared-kernel";
 
+import type { AnchorFundingGuard } from "../../application/ports/account-balance.js";
 import {
   AnchorError,
   type AnchorReceipt,
   type HashAnchor,
   isValidSha256Hex,
 } from "../../application/ports/hash-anchor.js";
+import { isUnderfundedLedgerError } from "../balance-monitor.js";
 
 export type StellarNetwork = "testnet" | "public";
 
@@ -47,6 +49,15 @@ export interface StellarHashAnchorOptions {
   readonly network: StellarNetwork;
   /** Overrides the default Horizon endpoint for the chosen network. Mainly for tests. */
   readonly horizonUrl?: string;
+  /**
+   * Checks that the account can pay the fee before submitting, and hears about
+   * a rejection caused by insufficient funds. See {@link AnchorFundingGuard}.
+   *
+   * Optional because the guard costs an extra Horizon call per anchor — worth
+   * paying when anchoring runs unattended, and skippable in a CLI one-shot
+   * where the operator is watching the output anyway.
+   */
+  readonly fundingGuard?: AnchorFundingGuard | undefined;
 }
 
 /**
@@ -73,12 +84,14 @@ export class StellarHashAnchor implements HashAnchor {
   private readonly server: Horizon.Server;
   private readonly networkPassphrase: string;
   private readonly networkId: string;
+  private readonly fundingGuard: AnchorFundingGuard | undefined;
 
   constructor(options: StellarHashAnchorOptions) {
     this.keypair = Keypair.fromSecret(options.secretKey);
     this.server = new Horizon.Server(options.horizonUrl ?? HORIZON_URLS[options.network]);
     this.networkPassphrase = NETWORK_PASSPHRASES[options.network];
     this.networkId = `stellar:${options.network}`;
+    this.fundingGuard = options.fundingGuard;
   }
 
   /** The public key anchoring transactions are submitted from. Safe to log and share — it's how anyone locates the anchor history. */
@@ -93,6 +106,15 @@ export class StellarHashAnchor implements HashAnchor {
           `Expected a 64-character lowercase hex SHA-256 digest, received ${String(hash.length)} characters.`,
         ),
       );
+    }
+
+    if (this.fundingGuard !== undefined) {
+      const cleared = await this.fundingGuard.beforeAnchor();
+      if (Result.isErr(cleared)) {
+        // Returned as-is: the guard has already raised its own alarm, and
+        // re-wrapping it here would bury that under a second, vaguer error.
+        return cleared;
+      }
     }
 
     try {
@@ -124,6 +146,14 @@ export class StellarHashAnchor implements HashAnchor {
         network: this.networkId,
       });
     } catch (error) {
+      if (this.fundingGuard !== undefined && isUnderfundedLedgerError(error)) {
+        // Reported and then still returned as a failure. A submission refused
+        // for want of funds is the one anchoring error that will never fix
+        // itself on a retry, so it has to reach the funding alarm rather than
+        // the scheduler's "warn and try again on the next tick" path.
+        await this.fundingGuard.reportUnderfundedRejection(describeError(error));
+      }
+
       return Result.err(
         new AnchorError(`Failed to anchor hash to Stellar: ${describeError(error)}`, {
           cause: error,

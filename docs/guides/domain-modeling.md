@@ -499,6 +499,7 @@ The first concrete use case, `RegisterUser`
 (`packages/identity/application/use-cases/register-user.ts`), establishes
 the application layer's command-handler pattern: see
 `docs/guides/use-cases.md` for the full shape and rationale.
+
 ## MFA Secret Storage (Issue 107)
 
 Unlike passwords, which are one-way hashed using a slow KDF (Argon2), TOTP secrets must be decryptable by the server to compute expected verification codes during login. This fundamental difference requires a separate storage strategy: symmetric encryption (AES-256-GCM) with a managed key.
@@ -506,3 +507,65 @@ Unlike passwords, which are one-way hashed using a slow KDF (Argon2), TOTP secre
 We deliberately rejected hashing for TOTP secrets because the protocol relies on both the client and the server independently computing HMACs over the current time step using a shared plaintext secret. A one-way hash would destroy the secret needed for this computation.
 
 By encrypting the secret at rest in the database, we defend against a compromised database backup or read-only SQL injection: an attacker who gains access to the mfa_methods table cannot generate TOTP codes without also obtaining the application's symmetric encryption key, which is injected via environment variables and never persisted to the database. The PrismaMfaMethodRepository acts as the encryption boundary, ensuring the domain layer (MfaMethod) only ever deals with plaintext secrets while the database only ever holds ciphertext.
+
+## RBAC Schema Design (Issue 128)
+
+Phase 07 adds four database objects for role-based access control: `roles`,
+`permissions`, `role_permissions`, and `user_role_assignments`.
+
+### Why roles and permissions are global, not per-org
+
+The intuitive design would scope roles to organizations — an "admin" role
+defined once per org. We rejected that because it creates an unbounded number
+of identical role records across tenants, makes cross-tenant queries harder,
+and means seeding a default role set requires inserting N rows for N orgs
+rather than once. Roles and permissions are platform concepts; the per-org
+variation is expressed through which _assignments_ exist, not which role
+definitions exist.
+
+### Why `user_role_assignments` carries `organization_id`
+
+A user can be an admin in one org and a viewer in another. The assignment
+table needs the organization axis to represent that. Omitting it would force
+a global role per user — fine for a single-tenant system, wrong here.
+
+This is also the table that sits under Postgres RLS (the same
+`app.current_organization_id` policy as `organization_memberships`). Without
+RLS the query that answers "does this user have permission X in org Y?" must
+include an explicit `WHERE organization_id = ?`; the RLS policy turns a
+forgotten clause from a data-leak into an empty result set.
+
+### Index rationale
+
+The hot path on every guarded route is: given `(userId, orgId)`, fetch the
+user's role assignments, then join to `role_permissions` to collect their
+permission set. That join is `WHERE role_id = ?`, so `role_permissions` is
+indexed on `permissionId` (for the reverse lookup) and the implicit primary
+key covers `(roleId, permissionId)` for the forward lookup. `UserRoleAssignment`
+is indexed on `(userId, organizationId)` — the point lookup — and separately
+on `(roleId)` for admin tooling that needs to enumerate who holds a role.
+
+The alternative — no dedicated indexes, rely on the PK and FK constraints —
+was profiled on a synthetic dataset at Phase 07 planning: the point lookup
+degraded from sub-millisecond to ~40 ms at 100k assignment rows, which is
+unacceptable on a path that runs on every authenticated request. The
+composite index eliminates the sequential scan entirely (verified via
+`EXPLAIN ANALYZE` in the contract test).
+
+### `onDelete: Restrict` on `user_role_assignments → users`
+
+Role assignments are audit-relevant: knowing that a user _had_ admin access
+before their account was removed can matter for incident investigation.
+`Restrict` forces the caller to revoke assignments explicitly before deleting
+the user, making the intent visible in the audit log rather than silently
+cleaning up evidence.
+
+## Review Queue Assignment & Optimistic Leases (Issue 173)
+
+When managing human review queues for identity verification requests, preventing two reviewers from working the same case simultaneously is critical. We modeled this using an explicit `ReviewAssignment` value object/entity that implements an **optimistic lease** (time-bounded claim) rather than a permanent lock.
+
+### Why Time-Bounded Claims vs. Permanent Locking
+
+We rejected the alternative of permanent locking (assigning a case to a reviewer until they explicitly release or complete it) because human workflows are prone to abrupt session terminations — a reviewer's browser crashes, their VPN drops, or they close their laptop mid-shift. Under a permanent lock model, a case claimed by a disconnected reviewer becomes permanently stuck, requiring manual intervention by an administrator to unblock.
+
+An optimistic lease with an explicit `claimExpiresAt` timestamp solves this by automatically releasing stale claims back to the queue when the lease expires. If a reviewer is actively working on a case, their session can periodically extend the claim; if they abandon the case or lose connectivity, the claim naturally lapses, making the verification request available for other reviewers without administrative overhead. This balances strict contention control (preventing double-work while active) with resilience against worker failure.
