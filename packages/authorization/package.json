@@ -18,6 +18,16 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.2",
+    "@vitest/coverage-v8": "^2.1.9",
+    "fastify": "^5.12.1",
+    "supertest": "^7.0.0",
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
+    "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "ioredis": "^5.11.1",
     "typescript": "^5.7.2",

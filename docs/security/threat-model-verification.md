@@ -63,13 +63,13 @@ Verixa's identity verification architecture consists of components spanning requ
 
 Every component in the verification workflow enforces strict fail-closed behavior:
 
-| Component                      | Failure Mode                                              | Behavior & Security Stance                                                                                                                                             | Mitigating Issue     |
-|:-------------------------------|:----------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------|
-| **Evidence Storage**           | S3/storage backend unavailable, encryption failure        | **Fail Closed.** Evidence submission returns error to user. Request remains in `pending_evidence` state. No evidence bytes are accepted if encryption fails.           | Issue 166            |
-| **Malware Scanner**            | Scanner timeout, service unavailable                      | **Fail Closed.** Evidence submission is rejected. No file reaches storage if scanner cannot verify safety.                                                             | Issue 169            |
-| **Verification Provider**      | Provider API timeout, network failure, invalid response   | **Fail Safe.** Automated check result records as `inconclusive`. Request transitions to `in_review` for manual reviewer decision. No auto-approval on provider failure. | Issue 170, 172       |
-| **Review Queue Assignment**    | Database lock timeout, concurrent claim collision         | **Fail Safe.** Claim attempt returns error. Reviewer must retry. No double-assignment occurs due to `SELECT FOR UPDATE SKIP LOCKED` serialization.                     | Issue 174            |
-| **Status Transition**          | Illegal state transition attempted                        | **Fail Closed.** State machine (Issue 162) rejects transition with domain error. Request remains in prior state. Audit log records attempted illegal transition.       | Issue 162            |
+| Component                   | Failure Mode                                            | Behavior & Security Stance                                                                                                                                              | Mitigating Issue |
+| :-------------------------- | :------------------------------------------------------ | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------- |
+| **Evidence Storage**        | S3/storage backend unavailable, encryption failure      | **Fail Closed.** Evidence submission returns error to user. Request remains in `pending_evidence` state. No evidence bytes are accepted if encryption fails.            | Issue 166        |
+| **Malware Scanner**         | Scanner timeout, service unavailable                    | **Fail Closed.** Evidence submission is rejected. No file reaches storage if scanner cannot verify safety.                                                              | Issue 169        |
+| **Verification Provider**   | Provider API timeout, network failure, invalid response | **Fail Safe.** Automated check result records as `inconclusive`. Request transitions to `in_review` for manual reviewer decision. No auto-approval on provider failure. | Issue 170, 172   |
+| **Review Queue Assignment** | Database lock timeout, concurrent claim collision       | **Fail Safe.** Claim attempt returns error. Reviewer must retry. No double-assignment occurs due to `SELECT FOR UPDATE SKIP LOCKED` serialization.                      | Issue 174        |
+| **Status Transition**       | Illegal state transition attempted                      | **Fail Closed.** State machine (Issue 162) rejects transition with domain error. Request remains in prior state. Audit log records attempted illegal transition.        | Issue 162        |
 
 ---
 
@@ -226,7 +226,7 @@ Every component in the verification workflow enforces strict fail-closed behavio
 - **Description**: An attacker uploads crafted files (zip bombs, polyglot files, files with excessive compression) designed to exhaust malware scanner resources or trigger scanner crashes.
 - **Impact**: Malware scanner becomes unavailable, blocking all evidence submissions. Queue processing halts.
 - **Mitigation**:
-  - **Pre-Scanner Validation** (Issue 169): File size and MIME type checks occur *before* malware scanning. Zip bombs and excessively large files are rejected by size limit without reaching scanner.
+  - **Pre-Scanner Validation** (Issue 169): File size and MIME type checks occur _before_ malware scanning. Zip bombs and excessively large files are rejected by size limit without reaching scanner.
   - **Scanner Timeout** (Issue 169): Malware scanner invocation has strict timeout (e.g., 30 seconds). Files causing scanner hangs are rejected after timeout expires.
   - **Scanner Failure Handling** (Issue 169): Scanner unavailability is treated as fail-closed (evidence rejected), not fail-open. System degrades to "no evidence accepted" rather than "all evidence accepted without scanning."
 
@@ -268,15 +268,15 @@ Every component in the verification workflow enforces strict fail-closed behavio
 
 Every security-relevant operation in the verification workflow emits domain events captured by Phase 10's audit log:
 
-| Event                            | Triggered By                | Audit Fields                                                                 | Compliance Purpose                   |
-|:---------------------------------|:----------------------------|:-----------------------------------------------------------------------------|:-------------------------------------|
-| `verification.request.submitted` | Issue 167                   | `actorId`, `organizationId`, `verificationType`                              | KYC request initiation timestamp     |
-| `verification.evidence.submitted`| Issue 168                   | `actorId`, `evidenceType`, `evidenceCount`, checksum                         | Evidence upload attribution          |
-| `verification.check.automated`   | Issue 172                   | `providerName`, `outcome`, `confidenceScore`, `providerRawRef`               | Automated check result provenance    |
-| `verification.review.claimed`    | Issue 174                   | `reviewerId`, `claimExpiresAt`                                               | Reviewer accountability              |
-| `verification.review.approved`   | Issue 175                   | `reviewerId`, `rationale`, session context (IP, user agent)                  | Approval decision non-repudiation    |
-| `verification.review.rejected`   | Issue 175                   | `reviewerId`, `rationale`, session context                                   | Rejection decision non-repudiation   |
-| `verification.evidence.accessed` | Issue 166 (signed URL generation) | `actorId`, `evidenceId`, `timestamp`                                  | Evidence access forensics            |
+| Event                             | Triggered By                      | Audit Fields                                                   | Compliance Purpose                 |
+| :-------------------------------- | :-------------------------------- | :------------------------------------------------------------- | :--------------------------------- |
+| `verification.request.submitted`  | Issue 167                         | `actorId`, `organizationId`, `verificationType`                | KYC request initiation timestamp   |
+| `verification.evidence.submitted` | Issue 168                         | `actorId`, `evidenceType`, `evidenceCount`, checksum           | Evidence upload attribution        |
+| `verification.check.automated`    | Issue 172                         | `providerName`, `outcome`, `confidenceScore`, `providerRawRef` | Automated check result provenance  |
+| `verification.review.claimed`     | Issue 174                         | `reviewerId`, `claimExpiresAt`                                 | Reviewer accountability            |
+| `verification.review.approved`    | Issue 175                         | `reviewerId`, `rationale`, session context (IP, user agent)    | Approval decision non-repudiation  |
+| `verification.review.rejected`    | Issue 175                         | `reviewerId`, `rationale`, session context                     | Rejection decision non-repudiation |
+| `verification.evidence.accessed`  | Issue 166 (signed URL generation) | `actorId`, `evidenceId`, `timestamp`                           | Evidence access forensics          |
 
 All events include server-side timestamps and are append-only. Retroactive tampering is detectable via Phase 10's hash-chain verification.
 
@@ -299,6 +299,7 @@ All events include server-side timestamps and are append-only. Retroactive tampe
 **Risk**: A legitimate reviewer with valid credentials and `reviewer` role intentionally approves fraudulent verification requests in exchange for payment (bribery/collusion).
 
 **Why Accepted**: Technical controls cannot fully prevent deliberate insider abuse by authorized users. Mitigation relies on:
+
 - Audit logging (Phase 10) making every decision traceable and non-repudiable
 - Mandatory rationale fields, increasing effort required for mass collusion
 - Operational monitoring: anomaly detection for reviewers with suspiciously high approval rates or abnormal decision speed patterns (Phase 24 - observability)
@@ -323,6 +324,7 @@ All events include server-side timestamps and are append-only. Retroactive tampe
 **Why Accepted**: Verixa has no control over vendor security posture beyond TLS enforcement and API signature validation. Risk acceptance is inherent in outsourced verification model.
 
 **Mitigation Strategy**:
+
 - TLS certificate validation (Issue 170) prevents MITM
 - Manual review override (Issue 172) ensures human decision even if provider result is forged
 - Contractual vendor audit requirements (SOC 2, ISO 27001) and SLA penalties for breaches (procurement-level control, out of scope)
@@ -336,6 +338,7 @@ All events include server-side timestamps and are append-only. Retroactive tampe
 **Why Accepted**: Credential phishing is a general authentication threat not unique to verification workflow. Full prevention requires user education, device security, and MFA enforcement.
 
 **Mitigation Strategy**:
+
 - MFA required for reviewer role (dependency on Phase 06)
 - Short session TTLs for high-privilege roles
 - Audit logging of evidence access for forensic detection post-breach
@@ -347,26 +350,26 @@ All events include server-side timestamps and are append-only. Retroactive tampe
 
 ## Threat Mitigation Summary Table
 
-| Threat ID | Threat Category       | Severity | Mitigating Issues                     | Residual Risk |
-|:----------|:----------------------|:---------|:--------------------------------------|:--------------|
-| S-1       | Forged Evidence       | High     | 170, 171, 173-177 (manual review)     | Medium        |
-| S-2       | Reviewer Impersonation| High     | 175, 178, Phase 04 (RBAC), Phase 05   | Low           |
-| S-3       | Evidence Substitution | Critical | 165, 166, 180, Phase 10               | Low           |
-| T-1       | Decision Spoofing     | Critical | 162, 175, Phase 10                    | Low           |
-| T-2       | Queue Race Condition  | Medium   | 173, 174                              | Low           |
-| T-3       | Evidence Metadata Tampering | Medium | 165, 169                            | Low           |
-| R-1       | Reviewer Denies Decision | High  | 175, Phase 06, Phase 10               | Low           |
-| R-2       | Evidence Access Gap   | High     | 166, Phase 10                         | Low           |
-| R-3       | Provider Result Forgery | Medium | 172, 170 (signature validation)       | Medium        |
-| I-1       | Cross-Tenant Leak     | Critical | 164, 177, 052 (RLS)                   | Low           |
-| I-2       | URL Leakage           | Medium   | 166, 178, 008 (structured logs)       | Low           |
-| I-3       | Provider MITM         | High     | 170, 171 (TLS enforcement)            | Low           |
-| D-1       | Request Flooding      | Medium   | 167, 169, Phase 15 (rate limiting)    | Medium        |
-| D-2       | Claim Hoarding        | Low      | 173, 174                              | Low           |
-| D-3       | Scanner DoS           | Medium   | 169                                   | Low           |
-| E-1       | Unauthorized Queue Access | High | 178, Phase 04                         | Low           |
-| E-2       | Decision Modification | Critical | 162, 175                              | Low           |
-| E-3       | Validation Bypass     | High     | 168, 169, 179 (encapsulation)         | Low           |
+| Threat ID | Threat Category             | Severity | Mitigating Issues                   | Residual Risk |
+| :-------- | :-------------------------- | :------- | :---------------------------------- | :------------ |
+| S-1       | Forged Evidence             | High     | 170, 171, 173-177 (manual review)   | Medium        |
+| S-2       | Reviewer Impersonation      | High     | 175, 178, Phase 04 (RBAC), Phase 05 | Low           |
+| S-3       | Evidence Substitution       | Critical | 165, 166, 180, Phase 10             | Low           |
+| T-1       | Decision Spoofing           | Critical | 162, 175, Phase 10                  | Low           |
+| T-2       | Queue Race Condition        | Medium   | 173, 174                            | Low           |
+| T-3       | Evidence Metadata Tampering | Medium   | 165, 169                            | Low           |
+| R-1       | Reviewer Denies Decision    | High     | 175, Phase 06, Phase 10             | Low           |
+| R-2       | Evidence Access Gap         | High     | 166, Phase 10                       | Low           |
+| R-3       | Provider Result Forgery     | Medium   | 172, 170 (signature validation)     | Medium        |
+| I-1       | Cross-Tenant Leak           | Critical | 164, 177, 052 (RLS)                 | Low           |
+| I-2       | URL Leakage                 | Medium   | 166, 178, 008 (structured logs)     | Low           |
+| I-3       | Provider MITM               | High     | 170, 171 (TLS enforcement)          | Low           |
+| D-1       | Request Flooding            | Medium   | 167, 169, Phase 15 (rate limiting)  | Medium        |
+| D-2       | Claim Hoarding              | Low      | 173, 174                            | Low           |
+| D-3       | Scanner DoS                 | Medium   | 169                                 | Low           |
+| E-1       | Unauthorized Queue Access   | High     | 178, Phase 04                       | Low           |
+| E-2       | Decision Modification       | Critical | 162, 175                            | Low           |
+| E-3       | Validation Bypass           | High     | 168, 169, 179 (encapsulation)       | Low           |
 
 ---
 

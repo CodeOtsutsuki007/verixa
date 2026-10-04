@@ -237,8 +237,7 @@ export const AUDIT_METADATA_SCHEMAS: Partial<Record<AuditAction, z.ZodTypeAny>> 
   "identity.organization.invitation_sent": identityOrganizationInvitationSentSchema,
   // Credentials
   "credentials.user.registered_with_password": credentialsUserRegisteredWithPasswordSchema,
-  "credentials.password.authentication_succeeded":
-    credentialsPasswordAuthenticationSucceededSchema,
+  "credentials.password.authentication_succeeded": credentialsPasswordAuthenticationSucceededSchema,
   "credentials.password.authentication_failed": credentialsPasswordAuthenticationFailedSchema,
   "credentials.email.verification_requested": credentialsEmailVerificationRequestedSchema,
   "credentials.email.verification_completed": credentialsEmailVerificationCompletedSchema,

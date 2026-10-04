@@ -65,7 +65,9 @@ describe("ConfirmTotpEnrollment", () => {
 
   it("rejects confirmation if the method is already active", async () => {
     const { useCase, fakeRepo } = setup();
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" }).activate();
+    const method = MfaMethod.createPendingTotp(createId<"UserId">(), {
+      value: "SECRET",
+    }).activate();
     await fakeRepo.save(method);
 
     const result = await useCase.execute({

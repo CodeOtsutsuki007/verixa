@@ -7,9 +7,26 @@ import type {
 } from "../../application/ports/credential-repository.js";
 import { Credential, type CredentialUserId } from "../../domain/entities/credential.js";
 
+/**
+ * What goes *into* the database.
+ *
+ * Distinct from `CredentialRow` only in `passwordHistory`: Prisma types that
+ * column as `JsonValue` on the way out, because a Json column can hold
+ * anything, but an insert needs a concrete value. The read and write
+ * directions genuinely differ, and collapsing them would mean casting.
+ */
+type CredentialRowInput = Omit<CredentialRow, "passwordHistory"> & {
+  passwordHistory: string[];
+};
+
+/** Reads the Json `password_history` column back as the string list the domain expects. */
+function toPasswordHistory(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
 /** Row ↔ aggregate translation for `Credential`. */
 export const CredentialMapper = {
-  toDomain(row: CredentialRow & { passwordHistory?: string[] }): Credential {
+  toDomain(row: CredentialRow): Credential {
     return Credential.reconstitute({
       id: asId<"CredentialId">(row.id),
       userId: asId<"UserId">(row.userId),
@@ -20,13 +37,17 @@ export const CredentialMapper = {
       // what stops `null` leaking inward and forcing every call site to
       // handle both.
       lockedUntil: row.lockedUntil ?? undefined,
-      passwordHistory: (row.passwordHistory as string[]) ?? [],
+      // `passwordHistory` is a Json column, so Prisma types it as JsonValue:
+      // the shape is a convention this code maintains, not one Postgres
+      // enforces. Coerced defensively rather than cast, so a hand-edited row
+      // degrades to an empty history instead of crashing a login.
+      passwordHistory: toPasswordHistory(row.passwordHistory),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     });
   },
 
-  toRow(credential: Credential): CredentialRow & { passwordHistory?: string[] } {
+  toRow(credential: Credential): CredentialRowInput {
     return {
       id: credential.id,
       userId: credential.userId,
@@ -110,11 +131,13 @@ export class PrismaCredentialRepository implements CredentialRepository {
     const p95Index = Math.floor(0.95 * (count - 1));
     const p95CreatedAt = staleCreatedAts[p95Index];
 
+    // Indexing an array yields `T | undefined` under
+    // noUncheckedIndexedAccess; the metric contract uses `null` for absent.
     return {
       count,
-      oldestCreatedAt,
-      medianCreatedAt,
-      p95CreatedAt,
+      oldestCreatedAt: oldestCreatedAt ?? null,
+      medianCreatedAt: medianCreatedAt ?? null,
+      p95CreatedAt: p95CreatedAt ?? null,
     };
   }
 }

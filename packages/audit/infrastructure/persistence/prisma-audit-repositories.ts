@@ -1,4 +1,4 @@
-import { asId } from "@verixa/shared-kernel";
+import { asId, Result } from "@verixa/shared-kernel";
 
 import type {
   AnchorRecord,
@@ -6,7 +6,12 @@ import type {
   AuditLogRepository,
   FindWithFiltersParams,
 } from "../../application/ports/audit-log-repository.js";
-import { type AuditAction, AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
+import { ChainConflictError } from "../../application/ports/audit-log-repository.js";
+import {
+  type AuditAction,
+  AuditLogEntry,
+  GENESIS_HASH,
+} from "../../domain/entities/audit-log-entry.js";
 
 /**
  * What comes *out* of the database.
@@ -53,7 +58,7 @@ interface AnchorRow {
  * Structural, so a transaction client satisfies it as readily as the root
  * one — the same convention every other repository here follows.
  */
-interface AuditDelegate {
+export interface AuditDelegate {
   findFirst(args: { orderBy: { sequence: "desc" } }): Promise<AuditRow | null>;
   findMany(args: {
     where?: {
@@ -68,8 +73,32 @@ interface AuditDelegate {
     take: number;
   }): Promise<AuditRow[]>;
   create(args: { data: AuditRowInput }): Promise<AuditRow>;
+  /**
+   * Inserts several rows in one statement. Used by the batched writer
+   * (`docs/performance/audit-write-throughput.md`) — one round trip per batch
+   * rather than per entry is the entire throughput argument.
+   *
+   * `data` is mutable here rather than `readonly`, matching what the generated
+   * client accepts: making it `readonly` would mean this delegate could not be
+   * satisfied by Prisma's own without an adapter whose only job is to drop the
+   * modifier.
+   */
+  createMany(args: { data: AuditRowInput[] }): Promise<{ count: number }>;
   count(): Promise<number>;
 }
+
+/**
+ * Runs `work` inside a single database transaction, on a client whose audit
+ * delegate is bound to that transaction.
+ *
+ * Injected as a function rather than taken off a `PrismaClient` so this
+ * package keeps its structural-typing convention: Prisma types appear only in
+ * adapters, and the composition root supplies the closure that touches
+ * `$transaction`. It also makes the transaction boundary a *visible argument*
+ * at the construction site instead of something the repository reaches for
+ * whenever it likes.
+ */
+export type AuditTransaction = <T>(work: (entries: AuditDelegate) => Promise<T>) => Promise<T>;
 
 interface AnchorDelegate {
   findFirst(args: { orderBy: { sequence: "desc" } }): Promise<AnchorRow | null>;
@@ -131,22 +160,115 @@ export const AuditLogEntryMapper = {
   },
 };
 
-/** Prisma-backed, append-only `AuditLogRepository`. */
+/**
+ * Prisma-backed, append-only `AuditLogRepository`.
+ *
+ * ## How the append stays race-safe
+ *
+ * The compare-and-set is a *read plus insert inside one transaction*, and the
+ * thing making it correct is the unique index on `sequence`, not the
+ * transaction alone. At Postgres' default `READ COMMITTED` isolation two
+ * overlapping transactions can both read the same head — a transaction on its
+ * own gives you a consistent *snapshot*, not a lock on a row you have not
+ * inserted yet. So the check is best-effort and cheap, and the index is the
+ * real gate: whichever writer commits second raises `P2002`, which is
+ * translated into the same `ChainConflictError` a failed check would have
+ * produced. Callers cannot tell the two apart and should not need to.
+ *
+ * That is why the two operations are one method rather than a `headMatches()`
+ * predicate plus an `insert()`. Split them and every caller has to discover,
+ * by accident, that the gap between the two is where chains fork.
+ */
 export class PrismaAuditLogRepository implements AuditLogRepository {
-  constructor(private readonly entries: AuditDelegate) {}
+  constructor(
+    private readonly entries: AuditDelegate,
+    private readonly transaction: AuditTransaction,
+  ) {}
 
   async findLatest(): Promise<AuditLogEntry | undefined> {
     const row = await this.entries.findFirst({ orderBy: { sequence: "desc" } });
     return row === null ? undefined : AuditLogEntryMapper.toDomain(row);
   }
 
-  async append(entry: AuditLogEntry): Promise<void> {
-    // `create`, never `upsert`. An upsert would quietly overwrite an existing
-    // entry at the same sequence, which is the one operation this table must
-    // not permit — the unique index exists so a concurrent append *fails*, and
-    // reaching for upsert to make that failure go away would remove the
-    // guarantee rather than handle the race.
-    await this.entries.create({ data: AuditLogEntryMapper.toRow(entry) });
+  append(
+    entry: AuditLogEntry,
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>> {
+    return this.appendMany([entry], expectedPreviousHash);
+  }
+
+  /**
+   * Appends `entries` atomically, keeping only the whole batch or none of it.
+   *
+   * `entries.length === 0` is a no-op rather than an error: a flushed queue
+   * that happened to drain empty is a normal tick, and making it an error
+   * would push a pointless branch into every caller.
+   */
+  async appendMany(
+    entries: readonly AuditLogEntry[],
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>> {
+    if (entries.length === 0) {
+      return Result.ok(undefined);
+    }
+
+    const batch = this.validateBatch(entries, expectedPreviousHash);
+    if (Result.isErr(batch)) {
+      return batch;
+    }
+
+    try {
+      return await this.transaction<Result<void, ChainConflictError>>(async (tx) => {
+        const head = await tx.findFirst({ orderBy: { sequence: "desc" } });
+        const actualPreviousHash = head?.hash ?? GENESIS_HASH;
+
+        if (actualPreviousHash !== expectedPreviousHash) {
+          return Result.err(new ChainConflictError(expectedPreviousHash, actualPreviousHash));
+        }
+
+        // `create`, never `upsert`. An upsert would quietly overwrite an
+        // existing entry at the same sequence, which is the one operation this
+        // table must not permit — the unique index exists so a concurrent
+        // append *fails*, and reaching for upsert to make that failure go away
+        // would remove the guarantee rather than handle the race.
+        await tx.createMany({ data: entries.map((entry) => AuditLogEntryMapper.toRow(entry)) });
+
+        return Result.ok<void>(undefined);
+      });
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // Someone inserted between our read and our commit. The batch is
+        // rolled back by the transaction, so the chain is still intact — this
+        // is a lost race, not a corruption, and the caller's retry is safe.
+        const head = await this.entries.findFirst({ orderBy: { sequence: "desc" } });
+        return Result.err(new ChainConflictError(expectedPreviousHash, head?.hash ?? GENESIS_HASH));
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Rejects a batch that would not chain, before touching the database.
+   *
+   * A batch is only meaningful if each entry links to the one before it; if a
+   * caller assembled entries from two different reads, inserting it would
+   * write a chain that `verifyChain` reports as broken the moment anyone
+   * checks. Failing fast turns that into a plain error at the call site.
+   */
+  private validateBatch(
+    entries: readonly AuditLogEntry[],
+    expectedPreviousHash: string,
+  ): Result<void, ChainConflictError> {
+    let previousHash = expectedPreviousHash;
+
+    for (const entry of entries) {
+      if (entry.previousHash !== previousHash) {
+        return Result.err(new ChainConflictError(previousHash, entry.previousHash));
+      }
+      previousHash = entry.hash;
+    }
+
+    return Result.ok(undefined);
   }
 
   async findFrom(fromSequence: number, limit: number): Promise<readonly AuditLogEntry[]> {
@@ -209,6 +331,20 @@ export class PrismaAuditLogRepository implements AuditLogRepository {
   count(): Promise<number> {
     return this.entries.count();
   }
+}
+
+/**
+ * Whether a thrown error is Prisma's unique-constraint violation (`P2002`).
+ *
+ * Detected structurally rather than with `instanceof Prisma.PrismaClientKnownRequestError`,
+ * so this package does not have to depend on the generated client — the same
+ * reason the delegates above are structural interfaces. Duck-typing an error
+ * code is a little loose, but the only consequence of a false positive here is
+ * reporting a conflict instead of an unexpected error, and the caller's
+ * response to both is to re-read the head.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "P2002";
 }
 
 /** Prisma-backed `AnchorRecordRepository`. */

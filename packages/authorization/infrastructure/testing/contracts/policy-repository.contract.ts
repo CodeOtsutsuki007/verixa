@@ -135,6 +135,42 @@ export function policyRepositoryContract(createRepository: () => PolicyRepositor
       expect(results).toEqual([]);
     });
 
+    it("does not return draft or archived policies for authorization", async () => {
+      const repository = createRepository();
+      const draft = Policy.create({
+        name: "draft",
+        target: { resourceType: "document", actions: ["read"] },
+        rules: [Rule.create({ effect: "PERMIT", condition: Condition.always() })],
+        status: "draft",
+      });
+      const archived = Policy.create({
+        name: "archived",
+        target: { resourceType: "document", actions: ["read"] },
+        rules: [Rule.create({ effect: "PERMIT", condition: Condition.always() })],
+        status: "archived",
+      });
+      if (draft.kind === "err") throw draft.error;
+      if (archived.kind === "err") throw archived.error;
+      await repository.save(draft.value);
+      await repository.save(archived.value);
+
+      await expect(repository.findApplicableTo("document", "read")).resolves.toEqual([]);
+    });
+
+    it("does not fall back to a published version when the latest version is archived", async () => {
+      const repository = createRepository();
+      const published = aPolicy();
+      await repository.save(published);
+      const archived = Policy.reconstitute({
+        ...published,
+        version: published.version + 1,
+        status: "archived",
+      });
+      await repository.save(archived);
+
+      await expect(repository.findApplicableTo("document", "read")).resolves.toEqual([]);
+    });
+
     it("findApplicableTo can return multiple applicable policies", async () => {
       const repository = createRepository();
       const first = aPolicy({ name: "first", resourceType: "document", actions: ["read"] });

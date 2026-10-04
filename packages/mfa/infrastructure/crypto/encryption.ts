@@ -9,14 +9,14 @@ function getEncryptionKey(): Buffer {
     // The issue says "symmetric encryption with a managed key", so it should be injected.
     return Buffer.alloc(32, 1);
   }
-  return Buffer.from(keyBase64, 'base64');
+  return Buffer.from(keyBase64, "base64");
 }
 
 export function encrypt(plaintext: string): string {
   const iv = randomBytes(12); // GCM standard IV size
   const key = getEncryptionKey();
   const cipher = createCipheriv("aes-256-gcm", key, iv);
-  
+
   let ciphertext = cipher.update(plaintext, "utf8");
   ciphertext = Buffer.concat([ciphertext, cipher.final()]);
   const authTag = cipher.getAuthTag();

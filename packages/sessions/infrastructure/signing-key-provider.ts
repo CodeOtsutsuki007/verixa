@@ -146,4 +146,3 @@ async function importKey(
     throw new Error(`Failed to import the ${half} key for kid "${kid}".`, { cause: error });
   }
 }
-﻿export class SigningKeyProvider {}

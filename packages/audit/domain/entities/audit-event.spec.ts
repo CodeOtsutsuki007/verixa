@@ -1,3 +1,4 @@
+import { asId } from "@verixa/shared-kernel";
 import { describe, expect, it } from "vitest";
 
 import { AuditEvent } from "./audit-event.js";
@@ -157,11 +158,13 @@ describe("AuditEvent", () => {
         organizationId: "org-789",
       });
 
-      // TypeScript compilation would fail if setters existed, but we can verify at runtime
-      const eventAsAny = event as any;
-      expect(typeof eventAsAny.setActorId).toBe("undefined");
-      expect(typeof eventAsAny.setAction).toBe("undefined");
-      expect(typeof eventAsAny.setMetadata).toBe("undefined");
+      // TypeScript would reject these at compile time, so the check has to be
+      // made at runtime. `Record<string, unknown>` says "look up an arbitrary
+      // key" without turning off type checking the way `any` does.
+      const asRecord = event as unknown as Record<string, unknown>;
+      expect(typeof asRecord["setActorId"]).toBe("undefined");
+      expect(typeof asRecord["setAction"]).toBe("undefined");
+      expect(typeof asRecord["setMetadata"]).toBe("undefined");
     });
 
     it("freezes metadata to prevent mutation", () => {
@@ -178,7 +181,7 @@ describe("AuditEvent", () => {
       });
 
       expect(() => {
-        (event.metadata as any).reason = "modified";
+        (event.metadata as unknown as Record<string, unknown>)["reason"] = "modified";
       }).toThrow();
     });
 
@@ -193,7 +196,7 @@ describe("AuditEvent", () => {
       });
 
       expect(() => {
-        (event.metadata as any).newKey = "value";
+        (event.metadata as unknown as Record<string, unknown>)["newKey"] = "value";
       }).toThrow();
     });
   });
@@ -201,7 +204,7 @@ describe("AuditEvent", () => {
   describe("reconstitute", () => {
     it("rebuilds an event from stored data without validation", () => {
       const storedProps = {
-        id: "evt_test123" as any,
+        id: asId<"AuditEventId">("evt_test123"),
         actorId: "user-123",
         action: "identity.user.registered" as const,
         resourceType: "user" as const,
@@ -226,7 +229,7 @@ describe("AuditEvent", () => {
     it("does not validate metadata when reconstituting", () => {
       // This would fail validation in create(), but reconstitute trusts stored data
       const storedProps = {
-        id: "evt_test123" as any,
+        id: asId<"AuditEventId">("evt_test123"),
         actorId: "user-123",
         action: "rbac.role.assigned" as const,
         resourceType: "user" as const,

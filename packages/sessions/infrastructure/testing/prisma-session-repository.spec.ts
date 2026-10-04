@@ -18,7 +18,9 @@ async function canConnect(hostname: string, port: number): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 1000);
-    const socket = await (await import("node:net")).createConnection({
+    const socket = await (
+      await import("node:net")
+    ).createConnection({
       host: hostname,
       port,
       signal: controller.signal,
@@ -117,9 +119,7 @@ describe.skipIf(!available)("PrismaSessionRepository (Issue 083)", () => {
       // Verify the index is used by running EXPLAIN ANALYZE on the actual query pattern.
       // The query plan should show an Index Scan on sessions_user_id_expires_at_idx,
       // not a Seq Scan or Index Only Scan without the index.
-      const explainResult = await prisma.$queryRawUnsafe<
-        Array<{ "QUERY PLAN": string }>
-      >(
+      const explainResult = await prisma.$queryRawUnsafe<Array<{ "QUERY PLAN": string }>>(
         `EXPLAIN (FORMAT JSON, ANALYZE) 
          SELECT * FROM sessions 
          WHERE user_id = $1::uuid AND status = 'active' AND expires_at > now()`,
@@ -166,9 +166,7 @@ describe.skipIf(!available)("PrismaSessionRepository (Issue 083)", () => {
 
       // Verify the expiresAt index is used for the expiry sweep query.
       // The expiry sweep query pattern: "SELECT * FROM sessions WHERE expires_at < now()"
-      const explainResult = await prisma.$queryRawUnsafe<
-        Array<{ "QUERY PLAN": string }>
-      >(
+      const explainResult = await prisma.$queryRawUnsafe<Array<{ "QUERY PLAN": string }>>(
         `EXPLAIN (FORMAT JSON, ANALYZE) 
          SELECT * FROM sessions 
          WHERE expires_at < now()`,

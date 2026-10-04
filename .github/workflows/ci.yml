@@ -238,10 +238,13 @@ jobs:
       - name: Re-link workspace packages
         run: pnpm install --frozen-lockfile
 
-      # Only the identity package: it owns the Prisma repository contract
-      # suite, which is what actually needs a database here.
-      - name: Run repository contract tests against a Testcontainers Postgres
+      # These packages own Prisma repository contract suites that need a
+      # real database.
+      - name: Run identity repository contract tests against Testcontainers Postgres
         run: pnpm --filter @verixa/identity run test
+
+      - name: Run authorization repository contract tests against Testcontainers Postgres
+        run: pnpm --filter @verixa/authorization run test
 
   # Verifies the *compose* stack's database roles, which nothing else covers.
   #

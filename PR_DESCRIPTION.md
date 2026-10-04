@@ -14,6 +14,7 @@ This PR consolidates four interconnected issues around credential management, es
 ## Changes
 
 ### 1. Threat Model Documentation (#077)
+
 **Branch:** `docs/threat-model-credentials`
 
 - Added comprehensive STRIDE-based threat model for credential flows
@@ -26,9 +27,11 @@ This PR consolidates four interconnected issues around credential management, es
 - Established security considerations for credential lifecycle management
 
 **Files:**
+
 - `docs/security/threat-model-credentials.md`
 
 ### 2. Public API Surface and Boundary Enforcement (#078)
+
 **Branch:** `feat/credentials-api-boundary`
 
 - Curated public API surface for `packages/credentials`
@@ -38,11 +41,13 @@ This PR consolidates four interconnected issues around credential management, es
 - Improved type safety through proper encapsulation
 
 **Files:**
+
 - `packages/credentials/src/index.ts` (refined exports)
 - Updated package boundaries and barrel files
 - Documentation of public API contract
 
 ### 3. Coverage-Gate Pattern (#076)
+
 **Branch:** `feature/076-credentials-coverage-gate`
 
 - Applied Phase 02 coverage-gate pattern to `packages/credentials`
@@ -52,11 +57,13 @@ This PR consolidates four interconnected issues around credential management, es
 - Configured coverage reporting and validation
 
 **Files:**
+
 - `packages/credentials/vitest.config.ts`
 - Coverage configuration and thresholds
 - CI workflow updates for coverage validation
 
 ### 4. Educational Walkthrough (#080)
+
 **Branch:** `docs/secure-auth-tutorial`
 
 - Created comprehensive "Build Secure Authentication" tutorial
@@ -66,6 +73,7 @@ This PR consolidates four interconnected issues around credential management, es
 - Integration with threat model and API boundary documentation
 
 **Files:**
+
 - `docs/guides/tutorials/build-secure-authentication.md`
 - Example implementations demonstrating secure patterns
 - Links to threat model and security documentation

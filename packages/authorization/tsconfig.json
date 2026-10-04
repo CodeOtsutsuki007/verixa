@@ -4,5 +4,12 @@
     "outDir": "dist",
     "rootDir": "."
   },
+  "include": [
+    "index.ts",
+    "domain/**/*",
+    "application/**/*",
+    "infrastructure/**/*",
+    "interface/**/*"
+  ]
   "include": ["index.ts", "domain/**/*", "application/**/*", "infrastructure/**/*"]
 }

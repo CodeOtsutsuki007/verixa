@@ -33,7 +33,23 @@ import {
   SuspendUser,
   UpdateUserProfile,
 } from "@verixa/identity";
+import { NoopRateLimiter } from "@verixa/shared-kernel";
 import {
+  LocalTransactionSigner,
+  StellarHashAnchor,
+  type StellarNetwork,
+  type TransactionSigner,
+} from "@verixa/stellar-anchor";
+import {
+  InMemoryDomainEventPublisher,
+  InMemoryMfaMethodRepository,
+  InMemoryWebAuthnChallengeRepository,
+  InMemoryWebAuthnCredentialRepository,
+  RegisterWebAuthnCredential,
+  VerifyWebAuthnAssertion,
+  WebAuthnAssertionVerifier,
+  WebAuthnAttestationVerifier,
+} from "@verixa/mfa";
   InMemoryEventPublisher,
   NoopRateLimiter,
   type DomainEventPublisher,
@@ -90,6 +106,93 @@ function pooledDatabaseUrl(): string {
   return url.toString();
 }
 
+/**
+ * Binds the audit append's compare-and-set to a real database transaction
+ * (Issue #128).
+ *
+ * `PrismaAuditLogRepository` takes the transaction as an injected function
+ * rather than a client it can call `$transaction` on, so that this package
+ * never has to name Prisma. This closure is the one place where that
+ * translation happens, and it is deliberately a *transaction runner* rather
+ * than a transaction object: the repository decides where the boundary goes,
+ * and a composition root that handed it an open transaction would move that
+ * decision to the wiring layer, where nobody is testing it.
+ */
+function auditTransaction(prisma: PrismaClient): AuditTransaction {
+  return <T>(work: (entries: AuditDelegate) => Promise<T>): Promise<T> =>
+    prisma.$transaction(async (tx) => work(tx.auditLogEntry));
+}
+
+/**
+ * Reads a positive integer setting, falling back when absent or malformed.
+ *
+ * Not validated by `@verixa/config` because these are tuning knobs for one
+ * adapter rather than part of the app's configuration contract, and a typo in
+ * `AUDIT_FLUSH_INTERVAL_MS` should degrade to the documented default rather
+ * than prevent the API from starting.
+ */
+function positiveIntFromEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Resolves the anchoring signing backend (Issue #129).
+ *
+ * `STELLAR_SIGNING_BACKEND` chooses between the two `TransactionSigner`
+ * implementations:
+ *
+ * - `local` — the key is in this process's environment. Testnet and development
+ *   only; on the public network it is refused unless
+ *   `STELLAR_ALLOW_LOCAL_SIGNING=1` states the risk explicitly.
+ * - `kms` — the key never enters this process. Cannot be built here: the cloud
+ *   SDK that talks to the key service belongs to the deployment, so the
+ *   signer is supplied through `ContainerOverrides.signer`. Setting `kms`
+ *   without supplying one is a startup failure rather than a silent downgrade
+ *   to no anchoring, because "I configured hardware-backed signing and got
+ *   nothing" is the worst possible outcome to discover during an audit.
+ *
+ * Unset means: `local` if `STELLAR_ANCHOR_SECRET_KEY` is present (the
+ * pre-#129 arrangement, kept working), otherwise no signer at all.
+ */
+function resolveSigner(
+  overrides: ContainerOverrides,
+  network: StellarNetwork,
+): TransactionSigner | undefined {
+  const backend = process.env["STELLAR_SIGNING_BACKEND"];
+
+  if (backend === "kms") {
+    if (overrides.signer === undefined) {
+      throw new Error(
+        'STELLAR_SIGNING_BACKEND is "kms" but no signer was supplied. Build a KmsTransactionSigner with your key service client at composition time and pass it as buildContainer(undefined, { signer }). See docs/security/stellar-key-management.md.',
+      );
+    }
+    return overrides.signer;
+  }
+
+  if (overrides.signer !== undefined) {
+    return overrides.signer;
+  }
+
+  const secretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
+  if (secretKey === undefined || secretKey === "") {
+    return undefined;
+  }
+
+  if (network === "public" && process.env["STELLAR_ALLOW_LOCAL_SIGNING"] !== "1") {
+    throw new Error(
+      "Refusing to anchor on the public network with a key read from the environment. Use STELLAR_SIGNING_BACKEND=kms, or set STELLAR_ALLOW_LOCAL_SIGNING=1 only if you accept the risk described in docs/security/stellar-key-management.md.",
+    );
+  }
+
+  return new LocalTransactionSigner(secretKey);
+}
+
 /** Every use case the application exposes, fully wired. */
 export interface IdentityUseCases {
   readonly registerUser: RegisterUser;
@@ -133,14 +236,42 @@ export interface AuditUseCases {
   readonly anchor: AnchorAuditLog | undefined;
 }
 
+/** Multi-factor authentication use cases. */
+export interface MfaUseCases {
+  readonly registerWebAuthnCredential: RegisterWebAuthnCredential;
+  readonly verifyWebAuthnAssertion: VerifyWebAuthnAssertion;
+}
+
 export interface Container {
   readonly prisma: PrismaClient;
   readonly eventPublisher: DomainEventPublisher;
   readonly identity: IdentityUseCases;
   readonly credentials: CredentialUseCases;
   readonly audit: AuditUseCases;
+  /**
+   * Drains any queued audit writes, then releases the database connection.
+   * Call on shutdown.
+   */
+  readonly mfa: MfaUseCases;
   /** Releases the database connection. Call on shutdown. */
   readonly dispose: () => Promise<void>;
+}
+
+/**
+ * Pieces a deployment must supply because they cannot be derived from
+ * environment variables alone.
+ */
+export interface ContainerOverrides {
+  /**
+   * A signer built by the deployment, for `STELLAR_SIGNING_BACKEND=kms`.
+   *
+   * It lives here rather than behind another environment variable because the
+   * point of the key service is that *this process never holds the key* — the
+   * SDK client that talks to it is configured by its own credential chain, and
+   * reconstructing that from strings here would put the credential management
+   * problem back where it started.
+   */
+  readonly signer?: TransactionSigner | undefined;
 }
 
 /**
@@ -150,7 +281,10 @@ export interface Container {
  * throwaway database. Production passes nothing and gets a client configured
  * from `DATABASE_URL`.
  */
-export function buildContainer(prismaClient?: PrismaClient): Container {
+export function buildContainer(
+  prismaClient?: PrismaClient,
+  overrides: ContainerOverrides = {},
+): Container {
   const prisma =
     prismaClient ?? new PrismaClient({ datasources: { db: { url: pooledDatabaseUrl() } } });
 
@@ -189,7 +323,7 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
   // Audit recording. Failures are logged and never propagated -- see
   // RecordAuditEvent on why a failed audit write must not fail the operation
   // it was recording.
-  const auditLog = new PrismaAuditLogRepository(prisma.auditLogEntry);
+  const auditLog = new PrismaAuditLogRepository(prisma.auditLogEntry, auditTransaction(prisma));
   const anchorRecords = new PrismaAnchorRecordRepository(prisma.anchorRecord, () => randomUUID());
 
   const recordAuditEvent = new RecordAuditEvent(auditLog, (error: unknown) => {
@@ -214,19 +348,45 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
 
   // Anchoring is wired only when a signing key is configured. See AuditUseCases
   // on why this is `undefined` rather than a no-op.
-  const anchorSecretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
-  const stellarNetwork = process.env["STELLAR_NETWORK"] === "public" ? "public" : "testnet";
+  const stellarNetwork: StellarNetwork =
+    process.env["STELLAR_NETWORK"] === "public" ? "public" : "testnet";
+  const signer = resolveSigner(overrides, stellarNetwork);
   const hashAnchor =
-    anchorSecretKey === undefined || anchorSecretKey === ""
-      ? undefined
-      : new StellarHashAnchor({ secretKey: anchorSecretKey, network: stellarNetwork });
+    signer === undefined ? undefined : new StellarHashAnchor({ signer, network: stellarNetwork });
 
-  // PrismaOrganizationRepository and PrismaOrganizationMembershipRepository
-  // aren't constructed here: the only use case that touches them
-  // (CreateOrganization) reaches them through the unit of work, since its two
-  // writes must commit together. Phase 12's read-only routes will need them
-  // directly, and that's when they get wired — building them now would mean
-  // an unused object graph pretending to be used.
+  // Multi-factor authentication (MFA) use cases and WebAuthn verifier adapters.
+  const webauthnRpId = process.env["WEBAUTHN_RP_ID"] ?? "localhost";
+  const webauthnOrigin = process.env["WEBAUTHN_ORIGIN"] ?? "http://localhost:3000";
+
+  const mfaMethodRepo = new InMemoryMfaMethodRepository();
+  const webAuthnCredentialRepo = new InMemoryWebAuthnCredentialRepository();
+  const webAuthnChallengeRepo = new InMemoryWebAuthnChallengeRepository();
+  const mfaEventPublisher = new InMemoryDomainEventPublisher();
+  const attestationVerifier = new WebAuthnAttestationVerifier();
+  const assertionVerifier = new WebAuthnAssertionVerifier();
+
+  const registerWebAuthnCredential = new RegisterWebAuthnCredential(
+    mfaMethodRepo,
+    webAuthnCredentialRepo,
+    webAuthnChallengeRepo,
+    attestationVerifier,
+    {
+      expectedOrigin: webauthnOrigin,
+      expectedRpId: webauthnRpId,
+    },
+  );
+
+  const verifyWebAuthnAssertion = new VerifyWebAuthnAssertion(
+    mfaMethodRepo,
+    webAuthnCredentialRepo,
+    webAuthnChallengeRepo,
+    assertionVerifier,
+    mfaEventPublisher,
+    {
+      expectedOrigin: webauthnOrigin,
+      expectedRpId: webauthnRpId,
+    },
+  );
 
   return {
     prisma,
@@ -287,7 +447,15 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
           ? undefined
           : new AnchorAuditLog(auditLog, anchorRecords, hashAnchor),
     },
+    mfa: {
+      registerWebAuthnCredential,
+      verifyWebAuthnAssertion,
+    },
     dispose: async () => {
+      // Drained *before* disconnecting, and only because the batched writer
+      // may hold entries that are not in the database yet. Skipping this is
+      // the one way the queue's bounded delay becomes permanent data loss.
+      await batchedWriter?.stop();
       await prisma.$disconnect();
     },
   };
