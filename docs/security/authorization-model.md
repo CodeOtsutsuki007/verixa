@@ -1,94 +1,139 @@
-# Authorization Model: RBAC + ABAC Composition
+# Authorization Model: RBAC × ABAC Composition
 
-`AuthorizationService` (`packages/authorization/application/services/authorization-service.ts`,
-Issue 152) is the central architectural decision of Phase 08: it composes
-Phase 07's role/permission grant check (RBAC) with ABAC policy evaluation
-into one decision, rather than treating them as two independent systems a
-caller has to consult separately.
+This document describes how Verixa decides "may this subject do this thing to this
+resource", and — more importantly — _why_ the composition is ordered the way it is.
+It is the design counterpart to Issue 152 (`AuthorizationService`), and it is written
+for someone who has to change that code without breaking it.
 
-## Why compose rather than pick one
+The composition service lives in [`packages/authorization`](../../packages/authorization);
+the security analysis of the same path is in [threat-model-abac.md](threat-model-abac.md).
 
-Coarse-grained role checks (`"editor"` can `"read"` any `"document"`) handle
-the common case cheaply, but can't express attribute-sensitive rules
-("only the owner, or only before the case closes"). ABAC policies can
-express those, but evaluating a full policy set for every request when a
-role already settles the question is unnecessary overhead. Hybrid RBAC+ABAC
-systems — AWS IAM and Google Zanzibar-adjacent designs both work this way —
-get their power from the _composition_ layer, not from either model alone.
-Getting the composition's precedence wrong is, per this codebase's own
-security tone, the single highest-risk authorization bug class: a silent
-over-grant that looks like correct code enforcing an incorrect policy.
+---
 
-## Precedence order
+## Two layers, one question
+
+Verixa answers authorization with two layers that know different things:
+
+| Layer                          | Knows                                       | Cost                                   | Answers                                                             |
+| :----------------------------- | :------------------------------------------ | :------------------------------------- | :------------------------------------------------------------------ |
+| **RBAC** (Phase 07)            | roles and permissions, tenant membership    | one indexed lookup                     | "does this subject's role allow this action on this resource type?" |
+| **ABAC** (Phase 08, Issue 148) | attributes: ownership, status, time, labels | parse + attribute resolution + combine | "does any policy apply, and what does it say?"                      |
+
+Neither layer is sufficient alone. Roles are cheap and coarse: they cannot express
+"the admin may reopen the case, but only while it is still in draft". Policies are
+expressive and expensive: routing every request through the engine pays attribute
+resolution for the overwhelmingly common "a role holder doing something their role
+covers" case.
+
+So the service does RBAC first, and consults policies _in addition_ rather than only
+in the alternative.
+
+## The precedence contract
 
 ```
-1. An applicable DENY policy always wins, regardless of the RBAC result.
-2. Otherwise, a definitive RBAC decision (PERMIT or DENY) passes through
-   unchanged.
-3. Otherwise (RBAC has no opinion), an applicable PERMIT policy grants.
-4. Otherwise, deny. Fail-closed.
+                 authorize(subject, action, resource)
+                                │
+                    ┌───────────▼───────────┐
+                    │   RolePermissionGate  │  (Phase 07)
+                    └───────────┬───────────┘
+              deny ─────────────┤
+              (final)           │ grant / no-match
+                    ┌───────────▼───────────┐
+                    │  PolicyDecisionPoint  │  (Issue 148, deny-overrides)
+                    └───────────┬───────────┘
+        DENY ───────────────────┤
+        (overrides a grant)     │ PERMIT / NOT_APPLICABLE
+                                ▼
+                        RBAC grant ? PERMIT : DENY
 ```
 
-| RBAC           | ABAC           | Result     | Why                                                                |
-| -------------- | -------------- | ---------- | ------------------------------------------------------------------ |
-| PERMIT         | PERMIT         | **PERMIT** | rule 2                                                             |
-| PERMIT         | DENY           | **DENY**   | rule 1 — an applicable deny policy overrides an RBAC grant         |
-| DENY           | PERMIT         | **DENY**   | rule 2 — RBAC's own deny is authoritative                          |
-| DENY           | DENY           | **DENY**   | rules 1 and 2 agree                                                |
-| NOT_APPLICABLE | PERMIT         | **PERMIT** | rule 3                                                             |
-| NOT_APPLICABLE | DENY           | **DENY**   | rule 1                                                             |
-| NOT_APPLICABLE | NOT_APPLICABLE | **DENY**   | rule 4 — fail-closed default                                       |
-| PERMIT         | NOT_APPLICABLE | **PERMIT** | rule 2 — RBAC-only decisions work unchanged from Phase 07 behavior |
-| DENY           | NOT_APPLICABLE | **DENY**   | rule 2 — RBAC-only decisions work unchanged from Phase 07 behavior |
+| RBAC       | ABAC                        | Result                                            |
+| :--------- | :-------------------------- | :------------------------------------------------ |
+| `deny`     | not consulted               | `DENY` — role denials are final                   |
+| `grant`    | `DENY`                      | `DENY` — an explicit policy denial overrides it   |
+| `grant`    | `PERMIT` / `NOT_APPLICABLE` | `PERMIT` — Phase 07 behaviour, unchanged          |
+| `no-match` | `PERMIT`                    | `PERMIT` — the policy layer is the only authority |
+| `no-match` | `DENY`                      | `DENY`                                            |
+| `no-match` | `NOT_APPLICABLE`            | `DENY` — absence of authority is not authority    |
 
-Every row above is a test in `authorization-service.spec.ts`. The rule worth
-stating explicitly: an RBAC grant is not the last word. A permissive role
-combined with an applicable `DENY` policy always ends in `DENY` — the ABAC
-layer's job is precisely to _refine or override_ the coarse-grained role
-check for attribute-sensitive resources, and a design where RBAC could
-short-circuit past a policy that says otherwise would defeat that purpose
-entirely.
+Three decisions inside that table are worth stating explicitly, because each of them
+is a place where a reasonable-looking alternative is wrong:
 
-ABAC's own multiple-policy, multiple-rule outcomes are reduced to one
-`PERMIT`/`DENY`/`NOT_APPLICABLE` value first, via a `CombiningAlgorithm`
-(default: `denyOverrides` — see `docs/security/policy-dsl-grammar.md`'s
-combining-algorithms section) before this precedence table is applied.
+1. **A role _grant_ does not short-circuit the policy engine.** The tempting
+   optimisation — "roles already said yes, skip the expensive part" — makes every
+   policy denial unreachable for every subject who holds a role. The policy layer
+   could then only ever _add_ authority. This is threat E-1, and it is the reason
+   the service consults policies even when the role check granted.
+2. **A role _denial_ does short-circuit the policy engine.** Nothing an attribute
+   says should talk a revoked permission back into existence; keeping this
+   short-circuit also means a deny path costs one lookup, not one lookup plus an
+   evaluation.
+3. **`NOT_APPLICABLE` is not a permit.** "No policy targets this" leaves an RBAC
+   answer standing — including an RBAC "no" — and defaults to denial. Treating an
+   empty policy set as approval is how a deployment that has not written its
+   policies yet ships permit-by-default.
 
-## RBAC is a port, not a dependency on Phase 07
+## Configuration, and what it refuses
 
-Phase 07 (RBAC — role/permission entities, role assignment, route guards)
-doesn't exist in this codebase yet. `AuthorizationService` depends on
-`RbacAuthorizationPort` (`packages/authorization/application/ports/rbac-authorization.ts`),
-not on any concrete RBAC implementation:
+The precedence order is resolved once, at construction, and carried as a value
+(`AUTHORIZATION_PRECEDENCE`) that the service exposes as `precedenceOrder` so the
+composition root can log the order it booted under.
 
-```ts
-export interface RbacAuthorizationPort {
-  checkGrant(params: {
-    subjectId: string;
-    action: string;
-    resourceType: string;
-  }): Promise<"PERMIT" | "DENY" | "NOT_APPLICABLE">;
-}
-```
+It is configuration, but not free-form configuration. `resolveAuthorizationPrecedence`
+and `assertAuthorizationPrecedenceIsSafe` reject any order that:
 
-`NoRbacGrants` implements it today: it always returns `NOT_APPLICABLE`,
-which is the truthful answer when no roles or permissions are defined
-anywhere in the system — not a stand-in for a real answer. This mirrors an
-existing pattern in this codebase, `packages/credentials/application/ports/session-revoker.ts`'s
-`NoSessionsRevoker` ("correct rather than a stub until Phase 05"): the real
-call site (`AuthorizationService`, and `AuthorizeAction` above it) exists
-and is exercised by tests today, rather than being written later once its
-dependency shows up. When Phase 07 lands, a real
-`RbacAuthorizationPort` implementation (backed by the role/permission
-tables Issues 121–140 introduce) replaces `NoRbacGrants` in the composition
-root, and nothing in `AuthorizationService` or `AuthorizeAction`
-(Issue 153) needs to change.
+- sets `abacDenyOverridesRbacPermit: false` — a role grant outranking a policy denial (threat E-1),
+- sets `abacPermitOverridesRbacDeny: true` — a policy resurrecting a revoked permission,
+- sets `defaultEffectWhenNoPolicyMatches: "PERMIT"` — permit-by-default (threat E-2).
 
-## Fail-closed by default
+A refused configuration throws `UnsafeAuthorizationPrecedenceError` at boot. The
+service therefore cannot be constructed in a state that silently over-grants, and a
+deployment that tries to is stopped at startup rather than granted access at request
+time.
 
-When neither RBAC nor ABAC has an opinion (both `NOT_APPLICABLE`), the
-result is `DENY`, not `PERMIT`. Two systems each silently assuming the
-other would catch an ungranted request is exactly the failure mode this
-composition layer exists to prevent — an explicit default-deny is safer
-than an implicit default-permit that only becomes visible once something
-gets through that shouldn't have.
+### The alternative that was rejected
+
+A fully free-form order — including an `rbac-first` mode that consults policies only
+when no role matched — was implemented first and then removed. It is one indexed
+lookup cheaper on the happy path, and it matches the summary sentence "check roles,
+fall through to ABAC" verbatim. It is rejected because it converts a precedence
+_decision_ into a precedence _bug with a config flag_: the mode's whole effect is
+that policy denials stop applying to role holders, which is exactly the silent
+over-grant that this phase is most likely to be blamed for. A configuration surface
+that cannot express an unsafe order is worth more than one that can, and the
+`assertAuthorizationPrecedenceIsSafe` tests document the shape of what is refused so
+a future reader can see the reasoning rather than re-discovering it.
+
+## Failure stance
+
+| Failure                                 | Result                                                                      |
+| :-------------------------------------- | :-------------------------------------------------------------------------- |
+| Role store unreachable (throws)         | `DENY`, `source: "fail-closed"`, reason "Role permission store unavailable" |
+| Policy repository unreachable (throws)  | `DENY`, `source: "fail-closed"`, reason "Policy repository unavailable"     |
+| Structurally unusable request           | `DENY`, `source: "fail-closed"`, reason "Invalid authorization request: …"  |
+| Unknown/unsafe precedence configuration | throws at construction — the process does not boot                          |
+
+Every request-shaped outcome is a returned decision, not an exception, because the
+caller (a Policy Enforcement Point in Phase 12) has to log and act on it either way.
+The two `fail-closed` reasons are distinct on purpose: "the role store is down" and
+"the policy repository is down" are different incidents, and the audit trail is the
+only place that distinction survives.
+
+Malformed requests are rejected before either layer is touched. An empty `action` or
+`resourceType` is not harmless: a wildcard or prefix rule can match the empty string,
+and a role store keyed on `(resourceType, action)` may answer from a bucket no real
+resource shares — so those values must not reach either layer.
+
+## Decisions carry their reason
+
+Every returned decision includes a stable `reason` and the `matchedPolicyIds` that
+contributed. That is deliberate: Phase 10's audit log records why access was granted
+or denied, and re-deriving the reason later from the same inputs is both expensive
+and a chance to derive it differently. `AUTHORIZATION_REASONS` is the closed set of
+those strings — tests assert on them, so changing one is a deliberate, reviewable act.
+
+## Related documentation
+
+- [Threat Model: Policy Engine & ABAC Evaluation](threat-model-abac.md) — STRIDE analysis of this path, including threats E-1 and E-2.
+- [Domain Modeling](../guides/domain-modeling.md) — the layering rules the port/service split follows.
+- [Multi-Tenancy & Row-Level Security](multi-tenancy.md) — the tenant boundary every `SubjectRef` carries.

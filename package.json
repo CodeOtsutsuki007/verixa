@@ -26,6 +26,7 @@
     "db:backup": "bash scripts/db-backup.sh",
     "db:restore": "bash scripts/db-restore.sh",
     "db:benchmark": "pnpm --filter @verixa/identity run benchmark",
+    "db:benchmark:audit": "pnpm --filter @verixa/database run benchmark:audit",
     "audit:verify-chain": "pnpm --filter @verixa/audit^... run build && pnpm --filter @verixa/audit run verify-chain"
   },
   "lint-staged": {

@@ -4,6 +4,7 @@ import { Result } from "@verixa/shared-kernel";
 
 import { stroopsToXlm, type AnchorFundingAlert } from "../../application/ports/account-balance.js";
 import { isValidSha256Hex } from "../../application/ports/hash-anchor.js";
+import { LocalTransactionSigner } from "../signing/local-transaction-signer.js";
 import { AnchorBalanceMonitor, HorizonAccountBalanceReader } from "../balance-monitor.js";
 import { StellarHashAnchor, type StellarNetwork } from "../stellar/stellar-hash-anchor.js";
 
@@ -20,6 +21,16 @@ import { StellarHashAnchor, type StellarNetwork } from "../stellar/stellar-hash-
  *
  * Verifying needs no secret key and no funded account — it only reads public
  * ledger data.
+ *
+ * ## Anchoring through this CLI is a development path
+ *
+ * The CLI signs with a key read from the environment, which is the arrangement
+ * `TransactionSigner` was introduced to replace. It stays because a testnet
+ * experiment should not require a KMS, and because the alternative — no CLI at
+ * all — would push operators to write their own, worse version. So it refuses to
+ * sign on the public network unless explicitly overridden. Production anchoring
+ * goes through the API's composition root, where a `KmsTransactionSigner` is
+ * wired. See `docs/security/stellar-key-management.md`.
  */
 
 const USAGE = `
@@ -30,6 +41,9 @@ Usage:
 
 Environment:
   STELLAR_ANCHOR_SECRET_KEY   Secret key (S...) of the anchoring account. Required for "anchor".
+                              Development and testnet only; see the note in this file's header.
+  STELLAR_NETWORK             "testnet" (default) or "public".
+  STELLAR_ALLOW_LOCAL_SIGNING Set to "1" to permit signing with the above on the public network.
   STELLAR_ANCHOR_PUBLIC_KEY   Account to report in "balance", if the secret key is not available.
   STELLAR_NETWORK             "testnet" (default) or "public".
   STELLAR_ANCHOR_MIN_XLM      Alert threshold in XLM for "balance". Defaults to 1.
@@ -139,11 +153,10 @@ async function main(): Promise<void> {
       );
     }
 
-    // Verification only reads public ledger data, so the key here is
-    // irrelevant — but the adapter needs *a* valid keypair to construct.
-    // A throwaway one keeps verification usable with no credentials at all.
-    const { Keypair } = await import("@stellar/stellar-sdk");
-    const anchor = new StellarHashAnchor({ secretKey: Keypair.random().secret(), network });
+    // No signer at all: verification only reads public ledger data. This used to
+    // require a throwaway keypair purely to satisfy the constructor, which is the
+    // kind of credential-shaped fiction that ends up in a runbook.
+    const anchor = new StellarHashAnchor({ network });
 
     const result = await anchor.verify(hash, anchorRef);
     if (Result.isErr(result)) {
@@ -159,12 +172,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (network === "public" && process.env["STELLAR_ALLOW_LOCAL_SIGNING"] !== "1") {
+    fail(
+      "Refusing to sign on the public network with a key from the environment.\nSet STELLAR_ALLOW_LOCAL_SIGNING=1 only if you accept the risk described in docs/security/stellar-key-management.md, and wire a KmsTransactionSigner instead.",
+    );
+  }
+
   const secretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
   if (secretKey === undefined || secretKey.length === 0) {
     fail("STELLAR_ANCHOR_SECRET_KEY must be set to anchor a hash.");
   }
 
-  const anchor = new StellarHashAnchor({ secretKey, network });
+  const anchor = new StellarHashAnchor({ signer: new LocalTransactionSigner(secretKey), network });
   const result = await anchor.anchor(hash);
 
   if (Result.isErr(result)) {

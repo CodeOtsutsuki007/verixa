@@ -138,6 +138,35 @@ enum MembershipStatus {
   @@map("membership_status")
 }
 
+/// Mirrors `PolicyStatus` in packages/authorization/domain/entities/policy.ts.
+enum PolicyLifecycleStatus {
+  draft
+  published
+  archived
+
+  @@map("policy_status")
+}
+
+/// One immutable revision of an authorization policy. The composite primary
+/// key makes each revision addressable while allowing a policy id to have a
+/// durable history of versions.
+model Policy {
+  id           String                @db.Uuid
+  version      Int
+  name         String
+  resourceType String                @map("resource_type")
+  actions      String[]
+  rules        Json
+  dslSource    String?               @map("dsl_source")
+  status       PolicyLifecycleStatus @default(published)
+  createdAt    DateTime              @map("created_at") @db.Timestamptz(3)
+
+  @@id([id, version])
+  @@index([resourceType, id, version(sort: Desc)], map: "policies_resource_type_id_version_idx")
+  @@index([actions], type: Gin, map: "policies_actions_gin_idx")
+  @@map("policies")
+}
+
 /// The multi-tenancy aggregate root. Maps to the `Organization` entity in
 /// packages/identity/domain/entities/organization.ts.
 model Organization {
@@ -492,9 +521,21 @@ model AuditLogEntry {
   /// SHA-256 over this entry's canonical form, including previousHash.
   hash String @unique
 
-  @@index([occurredAt])
-  @@index([actorId])
-  @@index([subjectId])
+  /// Composite indexes for the filtered query paths in
+  /// `PrismaAuditLogRepository.findWithFilters` (Issue 187), all of which
+  /// filter on one equality column and then walk the log in `sequence` order
+  /// for keyset pagination (Issue 188).
+  ///
+  /// `(actor_id, sequence)` rather than the roadmap's literal
+  /// `(actorId, timestamp)`: the query orders by `sequence`, not by time, so
+  /// the cursor column is the one the index has to lead with to avoid a sort.
+  /// The single-column indexes these replace are redundant — a composite is
+  /// usable by any prefix of its columns — so keeping both would only add
+  /// write cost.
+  @@index([actorId, sequence])
+  @@index([subjectId, sequence])
+  @@index([action, sequence])
+  @@index([occurredAt, sequence])
   @@map("audit_log_entries")
 }
 
@@ -577,6 +618,9 @@ model Role {
   /// seeding can locate the canonical record by name without ambiguity.
   name String @unique
 
+  /// Built-in roles are seeded and cannot be deleted or weakened by admins.
+  isSystemRole Boolean @default(false) @map("is_system_role")
+
   /// Human-readable description, optional.
   description String?
 
@@ -655,6 +699,10 @@ model UserRoleAssignment {
   /// When the assignment was made. Kept for audit purposes; the grant itself
   /// is expressed by the row's existence.
   assignedAt DateTime @map("assigned_at") @db.Timestamptz(3)
+
+  /// Who granted the role and when the grant expires, when either is known.
+  assignedBy String?   @map("assigned_by") @db.Uuid
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(3)
 
   /// FK to `users` — `Restrict` for the same reason as `Organization.owner`:
   /// deleting a user who still holds role assignments must fail rather than
