@@ -251,3 +251,15 @@ export {
   AuthorizeAction,
   type AuthorizeActionCommand,
 } from "./application/use-cases/authorize-action.js";
+
+// RBAC: default role/permission catalog, persistence and admin routes.
+export { Permission, Role, AuthorizationError } from "./domain/authorization.js";
+export type { PermissionKey, RoleRecord, RoleAssignment } from "./domain/authorization.js";
+export type { AuthorizationRepository } from "./application/authorization-repository.js";
+export { PrismaAuthorizationRepository } from "./infrastructure/prisma-authorization-repository.js";
+export {
+  DEFAULT_PERMISSIONS,
+  DEFAULT_ROLES,
+  seedDefaultRoles,
+} from "./infrastructure/seed/seed-default-roles.js";
+export { registerAdminAuthorizationRoutes } from "./interface/admin-roles.routes.js";

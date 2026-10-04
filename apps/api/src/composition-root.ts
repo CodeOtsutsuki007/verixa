@@ -8,6 +8,7 @@ import {
   RecordAuditEvent,
   VerifyAuditChain,
 } from "@verixa/audit";
+import { PrismaAuthorizationRepository, type AuthorizationRepository } from "@verixa/authorization";
 import { loadConfig } from "@verixa/config";
 import {
   Argon2PasswordHasher,
@@ -248,6 +249,7 @@ export interface Container {
   readonly identity: IdentityUseCases;
   readonly credentials: CredentialUseCases;
   readonly audit: AuditUseCases;
+  readonly authorization: AuthorizationRepository;
   /**
    * Drains any queued audit writes, then releases the database connection.
    * Call on shutdown.
@@ -289,6 +291,7 @@ export function buildContainer(
     prismaClient ?? new PrismaClient({ datasources: { db: { url: pooledDatabaseUrl() } } });
 
   const users = new PrismaUserRepository(prisma);
+  const authorization = new PrismaAuthorizationRepository(prisma);
   const invitations = new PrismaInvitationRepository(prisma);
   const unitOfWork = new PrismaUnitOfWork(prisma);
 
@@ -447,6 +450,7 @@ export function buildContainer(
           ? undefined
           : new AnchorAuditLog(auditLog, anchorRecords, hashAnchor),
     },
+    authorization,
     mfa: {
       registerWebAuthnCredential,
       verifyWebAuthnAssertion,

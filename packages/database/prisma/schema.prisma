@@ -618,6 +618,9 @@ model Role {
   /// seeding can locate the canonical record by name without ambiguity.
   name String @unique
 
+  /// Built-in roles are seeded and cannot be deleted or weakened by admins.
+  isSystemRole Boolean @default(false) @map("is_system_role")
+
   /// Human-readable description, optional.
   description String?
 
@@ -696,6 +699,10 @@ model UserRoleAssignment {
   /// When the assignment was made. Kept for audit purposes; the grant itself
   /// is expressed by the row's existence.
   assignedAt DateTime @map("assigned_at") @db.Timestamptz(3)
+
+  /// Who granted the role and when the grant expires, when either is known.
+  assignedBy String?   @map("assigned_by") @db.Uuid
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(3)
 
   /// FK to `users` — `Restrict` for the same reason as `Organization.owner`:
   /// deleting a user who still holds role assignments must fail rather than
