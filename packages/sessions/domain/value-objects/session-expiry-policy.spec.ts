@@ -85,9 +85,18 @@ describe("SessionExpiryPolicy", () => {
       const previousExpiresAt = new Date("2024-01-15T12:00:00Z");
 
       // Call touch at various times
-      const touch1 = policy.computeNewExpiresAt(previousExpiresAt, new Date("2024-01-15T10:00:00Z"));
-      const touch2 = policy.computeNewExpiresAt(previousExpiresAt, new Date("2024-01-15T11:00:00Z"));
-      const touch3 = policy.computeNewExpiresAt(previousExpiresAt, new Date("2024-01-15T11:59:00Z"));
+      const touch1 = policy.computeNewExpiresAt(
+        previousExpiresAt,
+        new Date("2024-01-15T10:00:00Z"),
+      );
+      const touch2 = policy.computeNewExpiresAt(
+        previousExpiresAt,
+        new Date("2024-01-15T11:00:00Z"),
+      );
+      const touch3 = policy.computeNewExpiresAt(
+        previousExpiresAt,
+        new Date("2024-01-15T11:59:00Z"),
+      );
 
       // All should be unchanged
       expect(touch1).toEqual(previousExpiresAt);

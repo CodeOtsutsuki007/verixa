@@ -28,7 +28,6 @@ export {
   type AndCondition,
   type ComparisonCondition,
   type ComparisonLiteral,
-  type ComparisonOperator,
   type NotCondition,
   type OrCondition,
 } from "./domain/value-objects/condition.js";
@@ -45,12 +44,6 @@ export {
   ResourceAttributeResolverRegistry,
   UnknownResourceTypeError,
 } from "./application/services/resource-attribute-resolver-registry.js";
-export {
-  AttributeContext,
-  type AttributeBag,
-  type AttributeCategory,
-  type AttributeValue,
-} from "./domain/value-objects/attribute-context.js";
 export { evaluateCondition, evaluateRule } from "./domain/services/policy-evaluation-engine.js";
 export {
   deriveRuleOutcomes,

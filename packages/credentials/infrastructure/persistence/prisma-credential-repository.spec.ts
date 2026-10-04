@@ -1,10 +1,9 @@
+import { asId } from "@verixa/shared-kernel";
 import { describe, expect, it } from "vitest";
 
-import type { StaleCredentialMetrics } from "../../application/ports/credential-repository.js";
-import { Credential, type CredentialUserId } from "../../domain/entities/credential.js";
-import { asId } from "@verixa/shared-kernel";
+import { Credential } from "../../domain/entities/credential.js";
+import { Argon2PasswordHasher } from "../argon2-password-hasher.js";
 import { InMemoryCredentialRepository } from "../testing/in-memory-credential-repository.js";
-import { Argon2PasswordHasher, DEFAULT_ARGON2_PARAMETERS } from "../argon2-password-hasher.js";
 
 /**
  * Weak and strong parameter sets for testing staleness detection.
@@ -44,8 +43,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const hash1 = await strongHasher.hash("password1");
       const hash2 = await strongHasher.hash("password2");
 
-      const cred1 = Credential.create({ userId: asId("UserId")("user1"), passwordHash: hash1 });
-      const cred2 = Credential.create({ userId: asId("UserId")("user2"), passwordHash: hash2 });
+      const cred1 = Credential.create({ userId: asId<"UserId">("user1"), passwordHash: hash1 });
+      const cred2 = Credential.create({ userId: asId<"UserId">("user2"), passwordHash: hash2 });
 
       await repo.save(cred1);
       await repo.save(cred2);
@@ -75,8 +74,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const threeWeeksAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000);
 
       const cred1 = Credential.reconstitute({
-        id: asId("CredentialId")("cred1"),
-        userId: asId("UserId")("user1"),
+        id: asId<"CredentialId">("cred1"),
+        userId: asId<"UserId">("user1"),
         passwordHash: hash1,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -85,8 +84,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const cred2 = Credential.reconstitute({
-        id: asId("CredentialId")("cred2"),
-        userId: asId("UserId")("user2"),
+        id: asId<"CredentialId">("cred2"),
+        userId: asId<"UserId">("user2"),
         passwordHash: hash2,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -95,8 +94,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const cred3 = Credential.reconstitute({
-        id: asId("CredentialId")("cred3"),
-        userId: asId("UserId")("user3"),
+        id: asId<"CredentialId">("cred3"),
+        userId: asId<"UserId">("user3"),
         passwordHash: hash3,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -134,8 +133,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
       const weakCred1 = Credential.reconstitute({
-        id: asId("CredentialId")("wcred1"),
-        userId: asId("UserId")("wuser1"),
+        id: asId<"CredentialId">("wcred1"),
+        userId: asId<"UserId">("wuser1"),
         passwordHash: weakHash1,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -144,8 +143,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const weakCred2 = Credential.reconstitute({
-        id: asId("CredentialId")("wcred2"),
-        userId: asId("UserId")("wuser2"),
+        id: asId<"CredentialId">("wcred2"),
+        userId: asId<"UserId">("wuser2"),
         passwordHash: weakHash2,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -154,8 +153,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const strongCred1 = Credential.reconstitute({
-        id: asId("CredentialId")("scred1"),
-        userId: asId("UserId")("suser1"),
+        id: asId<"CredentialId">("scred1"),
+        userId: asId<"UserId">("suser1"),
         passwordHash: strongHash1,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -164,8 +163,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const strongCred2 = Credential.reconstitute({
-        id: asId("CredentialId")("scred2"),
-        userId: asId("UserId")("suser2"),
+        id: asId<"CredentialId">("scred2"),
+        userId: asId<"UserId">("suser2"),
         passwordHash: strongHash2,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -200,8 +199,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
         const createdAt = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
         const hash = await weakHasher.hash(`password${i}`);
         const cred = Credential.reconstitute({
-          id: asId("CredentialId")(`cred${i}`),
-          userId: asId("UserId")(`user${i}`),
+          id: asId<"CredentialId">(`cred${i}`),
+          userId: asId<"UserId">(`user${i}`),
           passwordHash: hash,
           failedAttempts: 0,
           lockedUntil: undefined,
@@ -219,14 +218,22 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const expectedOldest = new Date(now.getTime() - 99 * 24 * 60 * 60 * 1000);
       expect(metrics.oldestCreatedAt).toEqual(expectedOldest);
 
-      // Median: for 100 items (indices 0-99), median index is floor((100-1)/2) = 49.
-      // That's item created 49 days ago.
-      const expectedMedian = new Date(now.getTime() - 49 * 24 * 60 * 60 * 1000);
+      // The list is sorted oldest-first, so index k holds the credential
+      // created (99 - k) days ago. These expectations previously assumed the
+      // opposite order, which is why they disagreed with the implementation
+      // by a day at the median and by 89 days at p95.
+      //
+      // Median: index floor((100 - 1) / 2) = 49, created 50 days ago.
+      const expectedMedian = new Date(now.getTime() - 50 * 24 * 60 * 60 * 1000);
       expect(metrics.medianCreatedAt).toEqual(expectedMedian);
 
-      // p95: index floor(0.95 * 99) = 94.
-      // That's item created 94 days ago.
-      const expectedP95 = new Date(now.getTime() - 94 * 24 * 60 * 60 * 1000);
+      // p95: index floor(0.95 * 99) = 94, created 5 days ago.
+      //
+      // Worth noting this is the 95th percentile of *creation date*, not of
+      // age -- so it reports a recent credential, not an old one. If the
+      // metric is meant to surface the oldest 5% for a staleness dashboard,
+      // the sort needs reversing; that is a product question, not a test fix.
+      const expectedP95 = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
       expect(metrics.p95CreatedAt).toEqual(expectedP95);
     });
   });
@@ -239,8 +246,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const strongHash = await strongHasher.hash("current_password");
 
       const weakCred = Credential.reconstitute({
-        id: asId("CredentialId")("wcred"),
-        userId: asId("UserId")("wuser"),
+        id: asId<"CredentialId">("wcred"),
+        userId: asId<"UserId">("wuser"),
         passwordHash: weakHash,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -249,8 +256,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const strongCred = Credential.reconstitute({
-        id: asId("CredentialId")("scred"),
-        userId: asId("UserId")("suser"),
+        id: asId<"CredentialId">("scred"),
+        userId: asId<"UserId">("suser"),
         passwordHash: strongHash,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -276,8 +283,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
 
       // A malformed hash is not a valid argon2 string, so needsRehash returns false.
       const malformedCred = Credential.reconstitute({
-        id: asId("CredentialId")("corrupt"),
-        userId: asId("UserId")("corruptuser"),
+        id: asId<"CredentialId">("corrupt"),
+        userId: asId<"UserId">("corruptuser"),
         passwordHash: "not-a-valid-hash",
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -286,8 +293,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const weakCred = Credential.reconstitute({
-        id: asId("CredentialId")("wcred"),
-        userId: asId("UserId")("wuser"),
+        id: asId<"CredentialId">("wcred"),
+        userId: asId<"UserId">("wuser"),
         passwordHash: await weakHasher.hash("password"),
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -314,8 +321,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       const hash2 = await weakHasher.hash("password2");
 
       const cred1 = Credential.reconstitute({
-        id: asId("CredentialId")("cred1"),
-        userId: asId("UserId")("user1"),
+        id: asId<"CredentialId">("cred1"),
+        userId: asId<"UserId">("user1"),
         passwordHash: hash1,
         failedAttempts: 0,
         lockedUntil: undefined,
@@ -324,8 +331,8 @@ describe("PrismaCredentialRepository.getStaleCredentialMetrics", () => {
       });
 
       const cred2 = Credential.reconstitute({
-        id: asId("CredentialId")("cred2"),
-        userId: asId("UserId")("user2"),
+        id: asId<"CredentialId">("cred2"),
+        userId: asId<"UserId">("user2"),
         passwordHash: hash2,
         failedAttempts: 0,
         lockedUntil: undefined,

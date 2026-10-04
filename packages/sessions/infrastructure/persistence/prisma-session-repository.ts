@@ -104,4 +104,3 @@ export class PrismaSessionRepository implements SessionRepository {
     );
   }
 }
-﻿export class PrismaSessionRepository {}

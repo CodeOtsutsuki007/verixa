@@ -2,14 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import {
   AnchorAuditLog,
-  PermissionGrantedAuditSubscriber,
   PrismaAnchorRecordRepository,
   PrismaAuditLogRepository,
   QueryAuditEvents,
   RecordAuditEvent,
-  RoleAssignedAuditSubscriber,
-  SessionCreatedAuditSubscriber,
-  SessionRevokedAuditSubscriber,
+  VerifyAuditChain,
 } from "@verixa/audit";
 import { loadConfig } from "@verixa/config";
 import {
@@ -36,8 +33,14 @@ import {
   SuspendUser,
   UpdateUserProfile,
 } from "@verixa/identity";
-import { NoopRateLimiter } from "@verixa/shared-kernel";
+import {
+  InMemoryEventPublisher,
+  NoopRateLimiter,
+  type DomainEventPublisher,
+} from "@verixa/shared-kernel";
 import { StellarHashAnchor } from "@verixa/stellar-anchor";
+
+import { registerAuditSubscribers } from "./composition/register-audit-subscribers.js";
 
 /**
  * The composition root: the one place in the system allowed to know which
@@ -107,10 +110,18 @@ export interface CredentialUseCases {
   readonly confirmPasswordReset: ConfirmPasswordReset;
 }
 
-/** Audit recording and its external anchoring. */
+/** Audit recording, query, integrity verification and its external anchoring. */
 export interface AuditUseCases {
   readonly recordEvent: RecordAuditEvent;
   readonly queryEvents: QueryAuditEvents;
+  /**
+   * Re-derives the hash chain and reports the first divergence.
+   *
+   * Wired here rather than left to the CLI alone, because the check is only a
+   * control if something can run it on a schedule; a tool a human has to
+   * remember to invoke is a tool that gets invoked after the incident.
+   */
+  readonly verifyChain: VerifyAuditChain;
   /**
    * Present only when an anchoring ledger is configured.
    *
@@ -191,22 +202,15 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
     );
   });
 
-  // Domain event publisher with audit subscribers (Phase 10, Issue 186).
-  // Subscribe to session lifecycle events (SessionCreated, SessionRevoked from Phase 05)
-  // and RBAC events (RoleAssigned, PermissionGranted from Phase 07).
+  // Domain event publisher, with every audit subscriber already on it.
+  //
+  // Registration is part of building the container rather than something a
+  // caller does afterwards, because the ordering is a correctness property, not
+  // a setup step: an event published with no subscriber attached is dropped
+  // permanently, and the first request a process serves is also the first
+  // event it publishes. See `composition/register-audit-subscribers.ts`.
   const eventPublisher = new InMemoryEventPublisher();
-
-  // Session audit subscribers
-  const sessionCreatedSubscriber = new SessionCreatedAuditSubscriber(recordAuditEvent);
-  const sessionRevokedSubscriber = new SessionRevokedAuditSubscriber(recordAuditEvent);
-  eventPublisher.subscribe("sessions.session.created", (event) => sessionCreatedSubscriber.handle(event));
-  eventPublisher.subscribe("sessions.session.revoked", (event) => sessionRevokedSubscriber.handle(event));
-
-  // RBAC audit subscribers
-  const roleAssignedSubscriber = new RoleAssignedAuditSubscriber(recordAuditEvent);
-  const permissionGrantedSubscriber = new PermissionGrantedAuditSubscriber(recordAuditEvent);
-  eventPublisher.subscribe("rbac.role.assigned", (event) => roleAssignedSubscriber.handle(event));
-  eventPublisher.subscribe("rbac.permission.granted", (event) => permissionGrantedSubscriber.handle(event));
+  registerAuditSubscribers(eventPublisher, recordAuditEvent);
 
   // Anchoring is wired only when a signing key is configured. See AuditUseCases
   // on why this is `undefined` rather than a no-op.
@@ -272,6 +276,12 @@ export function buildContainer(prismaClient?: PrismaClient): Container {
     audit: {
       recordEvent: recordAuditEvent,
       queryEvents: new QueryAuditEvents(auditLog),
+      // Verification is given the same ledger the anchor use case uses, so a
+      // deployment that anchors gets the independent ledger check for free and
+      // one that does not still gets the local re-derivation. `undefined` is
+      // honest here in the other direction: `VerifyAuditChain` reports
+      // `anchorsSkipped` rather than quietly returning an empty receipt list.
+      verifyChain: new VerifyAuditChain(auditLog, anchorRecords, hashAnchor),
       anchor:
         hashAnchor === undefined
           ? undefined

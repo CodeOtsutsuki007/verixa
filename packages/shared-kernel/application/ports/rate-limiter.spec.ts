@@ -1,12 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { NoopRateLimiter } from "../../infrastructure/adapters/noop-rate-limiter.js";
-import {
-  RateLimitExceededError,
-  type RateLimitKey,
-  type RateLimiter,
-  type RateLimitResult,
-} from "./rate-limiter.js";
+
+import { RateLimitExceededError, type RateLimitKey, type RateLimiter } from "./rate-limiter.js";
 
 /**
  * Test double: SpyRateLimiter that records all calls for verification.

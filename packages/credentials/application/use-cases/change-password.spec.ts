@@ -28,7 +28,11 @@ describe("ChangePassword (Issue 071)", () => {
     changePassword = new ChangePassword(unitOfWork, hasher, rateLimiter);
 
     // Register a test user
-    const registered = await new RegisterUserWithPassword(unitOfWork, hasher).execute({
+    const registered = await new RegisterUserWithPassword(
+      unitOfWork,
+      hasher,
+      new NoopRateLimiter(),
+    ).execute({
       email: EMAIL,
       displayName: "Alice",
       password: PASSWORD,
@@ -129,7 +133,8 @@ describe("ChangePassword (Issue 071)", () => {
 
       expect(Result.isErr(result)).toBe(true);
       if (!Result.isErr(result)) return;
-      expect(result.error.message).toContain("current password is incorrect");
+      // Case-insensitive: the message is a sentence, so it is capitalised.
+      expect(result.error.message.toLowerCase()).toContain("current password is incorrect");
     });
 
     it("does not change password on wrong current", async () => {
@@ -303,7 +308,11 @@ describe("ChangePassword (Issue 071)", () => {
 
     it("throws for user with no credential (internal error)", async () => {
       // Register another user
-      const registered = await new RegisterUserWithPassword(unitOfWork, hasher).execute({
+      const registered = await new RegisterUserWithPassword(
+        unitOfWork,
+        hasher,
+        new NoopRateLimiter(),
+      ).execute({
         email: "bob@example.com",
         displayName: "Bob",
         password: "bob's password",

@@ -3,7 +3,7 @@
 `RegisterUser` (`packages/identity/application/use-cases/register-user.ts`,
 Issue 030) is the first concrete example of the **command-handler pattern**
 every use case in Verixa follows: one class, one job, orchestrating domain
-objects and ports without containing business rules of its own.
+events, entities, and ports without containing business rules of its own.
 
 ## The shape
 
@@ -46,18 +46,16 @@ Every use case:
   throughout the domain layer, for the same reason: callers are forced to
   handle failure, and the type signature documents what can go wrong.
 
-## Why use cases are the unit of application logic
+## Cyclic Verification Loops: RequestMoreInformation
 
-A use case is deliberately the _only_ place that orchestrates multiple
-steps against ports and aggregates for a single business operation. The
-alternative — putting that orchestration in an HTTP route handler, or
-spreading it across multiple entity methods — makes the same operation hard
-to test without spinning up the interface layer, and hard to reuse if a
-second interface (a CLI, a background job) needs to trigger the same
-operation later. `RegisterUser.execute()` can be called identically from an
-HTTP handler, a CLI command, or a test, with zero HTTP/CLI-specific code
-inside it.
+`RequestMoreInformation` orchestrates the reviewer-initiated transition from
+`in_review → needs_more_info` requiring an explicit, visible note. This supports
+the non-linear KYC workflow where evidence is insufficient without forcing
+a full new request, preserving prior evidence and history across re-submits.
 
+Alternative rejected: forcing users to create a brand new verification request
+from scratch when a minor document blur occurs. Rejected because it discards
+audit history and creates unnecessary user friction.
 Business _rules_ still live in the domain layer, not here: `RegisterUser`
 doesn't decide what makes an email valid (`Email.create` does) or what
 status a new user starts in (`User.register` does). The use case's job is
@@ -133,6 +131,12 @@ for `active` to follow. But "reactivate" as an admin action only makes
 sense for a user who was actually suspended — so the use case checks
 `user.status === "suspended"` itself before calling `activate()`, rejecting
 a `pending` user even though the domain layer alone would have allowed it.
+
+## Automated Checks & Human-in-the-Loop: `RunAutomatedCheck`
+
+`RunAutomatedCheck` (`packages/verification/application/use-cases/run-automated-check.ts`, Issue 172) illustrates how third-party provider integrations are orchestrated without letting external systems bypass domain governance. The verification provider returns an automated signal (`pass`, `fail`, or `inconclusive`), but the status always lands in `in_review` rather than auto-approving or auto-rejecting.
+
+We deliberately rejected auto-deciding on provider signals alone in v1: false positives or negatives in automated KYC carry severe real-world consequences, so keeping the human reviewer as the authoritative decision-maker protects users while automated results inform their review.
 
 ## Multi-aggregate transactions: `CreateOrganization`
 
@@ -219,3 +223,31 @@ persists it — the "send the email with this token" step is simply not
 implemented anywhere yet, which is a different thing from being designed
 wrong. See `docs/guides/domain-modeling.md` for the general principle this
 follows.
+
+## Use cases that delegate their rules: the review flow
+
+`ClaimNextReviewCase`, `ApproveVerification`, `RejectVerification` and
+`RequestMoreInformation` (Issues 174 and 175, plus Issue 176's loop) are
+notably thin, on purpose.
+
+`ClaimNextReviewCase` owns only the policy it _can_ own — the claim lease
+length, and whether a reviewer already holding a case may be handed another.
+The guarantee that two reviewers never receive the same case cannot be
+enforced in application code at all: it is enforced by the repository, with
+`SELECT ... FOR UPDATE SKIP LOCKED` over the candidate row, because an
+application-level read-then-write always leaves a window in which two callers
+read the same unclaimed row. The use case returns `claimed` / `none` /
+`already_claiming` rather than throwing, because an empty queue is an ordinary
+outcome, not an error.
+
+The decision use cases are thin for the opposite reason: they add _no_ rules
+of their own beyond one — the mandatory rationale note. Transition legality,
+and "only the reviewer holding the active claim may decide", live on the
+aggregate, which owns the state machine and the claim. Duplicating either here
+would create a second place the rules are encoded, and therefore a second
+place they can disagree. The one rule that _is_ here — a non-empty note — is
+here for the same reason `SuspendUser`'s reason is: it is about what this
+specific administrative action is allowed to omit, not about what a
+`VerificationRequest` structurally requires. See
+`docs/security/authentication-flows.md` for the reviewer-decision
+cross-reference.

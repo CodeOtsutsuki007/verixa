@@ -47,10 +47,10 @@ interface RefreshTokenProps {
   readonly id: RefreshTokenId;
   readonly sessionId: SessionId;
   readonly hash: string;
-  readonly familyId?: string;
+  readonly familyId?: string | undefined;
   readonly expiresAt: Date;
   readonly createdAt: Date;
-  readonly revokedAt?: Date;
+  readonly revokedAt?: Date | undefined;
 }
 
 /**
@@ -231,4 +231,3 @@ export class RefreshToken {
     });
   }
 }
-﻿export class RefreshToken {}

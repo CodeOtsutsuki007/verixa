@@ -85,6 +85,30 @@ export interface HashAnchorPort {
   >;
 }
 
+/**
+ * The read half of an anchoring ledger: confirming that a commitment really
+ * exists somewhere the operator does not control.
+ *
+ * Declared separately from {@link HashAnchorPort} because verification needs
+ * *no credentials at all* — it reads public ledger data. Coupling the two into
+ * one port would mean a deployment that wants nothing more than to check its
+ * own anchors against the ledger has to hold a funded account's secret key to
+ * do it, which is precisely the trust boundary anchoring exists to remove.
+ *
+ * Structurally the second half of `HashAnchor` in `@verixa/stellar-anchor`,
+ * and — as with that port — deliberately not imported from it, so nothing above
+ * the adapter mentions a specific ledger.
+ */
+export interface AnchorVerifierPort {
+  verify(
+    hash: string,
+    anchorRef: string,
+  ): Promise<
+    | { readonly kind: "ok"; readonly value: boolean }
+    | { readonly kind: "err"; readonly error: AnchorFailure }
+  >;
+}
+
 /** The minimum an anchoring failure must carry. */
 export interface AnchorFailure {
   readonly message: string;

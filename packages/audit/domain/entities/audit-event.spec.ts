@@ -1,3 +1,4 @@
+import { asId } from "@verixa/shared-kernel";
 import { describe, expect, it } from "vitest";
 
 import { AuditEvent } from "./audit-event.js";
@@ -157,25 +158,30 @@ describe("AuditEvent", () => {
         organizationId: "org-789",
       });
 
-      // TypeScript compilation would fail if setters existed, but we can verify at runtime
-      const eventAsAny = event as any;
-      expect(typeof eventAsAny.setActorId).toBe("undefined");
-      expect(typeof eventAsAny.setAction).toBe("undefined");
-      expect(typeof eventAsAny.setMetadata).toBe("undefined");
+      // TypeScript would reject these at compile time, so the check has to be
+      // made at runtime. `Record<string, unknown>` says "look up an arbitrary
+      // key" without turning off type checking the way `any` does.
+      const asRecord = event as unknown as Record<string, unknown>;
+      expect(typeof asRecord["setActorId"]).toBe("undefined");
+      expect(typeof asRecord["setAction"]).toBe("undefined");
+      expect(typeof asRecord["setMetadata"]).toBe("undefined");
     });
 
     it("freezes metadata to prevent mutation", () => {
       const event = AuditEvent.create({
         actorId: "user-123",
-        action: "identity.user.registered",
+        action: "identity.user.suspended",
         resourceType: "user",
         resourceId: "user-456",
         organizationId: "org-789",
-        metadata: { key: "value" },
+        // `reason` because `identity.user.suspended` has a strict schema: an
+        // arbitrary key here would be rejected by validation, and this test is
+        // about the freeze, not about which fields an action carries.
+        metadata: { reason: "policy violation" },
       });
 
       expect(() => {
-        (event.metadata as any).key = "modified";
+        (event.metadata as unknown as Record<string, unknown>)["reason"] = "modified";
       }).toThrow();
     });
 
@@ -190,7 +196,7 @@ describe("AuditEvent", () => {
       });
 
       expect(() => {
-        (event.metadata as any).newKey = "value";
+        (event.metadata as unknown as Record<string, unknown>)["newKey"] = "value";
       }).toThrow();
     });
   });
@@ -198,7 +204,7 @@ describe("AuditEvent", () => {
   describe("reconstitute", () => {
     it("rebuilds an event from stored data without validation", () => {
       const storedProps = {
-        id: "evt_test123" as any,
+        id: asId<"AuditEventId">("evt_test123"),
         actorId: "user-123",
         action: "identity.user.registered" as const,
         resourceType: "user" as const,
@@ -223,7 +229,7 @@ describe("AuditEvent", () => {
     it("does not validate metadata when reconstituting", () => {
       // This would fail validation in create(), but reconstitute trusts stored data
       const storedProps = {
-        id: "evt_test123" as any,
+        id: asId<"AuditEventId">("evt_test123"),
         actorId: "user-123",
         action: "rbac.role.assigned" as const,
         resourceType: "user" as const,
@@ -243,17 +249,17 @@ describe("AuditEvent", () => {
     it("creates a copy with replaced metadata", () => {
       const original = AuditEvent.create({
         actorId: "user-123",
-        action: "identity.user.registered",
+        action: "identity.user.suspended",
         resourceType: "user",
         resourceId: "user-456",
         organizationId: "org-789",
-        metadata: { original: "value" },
+        metadata: { reason: "original" },
       });
 
-      const modified = original.withMetadata({ replaced: "newValue" });
+      const modified = original.withMetadata({ reason: "replaced" });
 
-      expect(modified.metadata).toEqual({ replaced: "newValue" });
-      expect(original.metadata).toEqual({ original: "value" }); // Original unchanged
+      expect(modified.metadata).toEqual({ reason: "replaced" });
+      expect(original.metadata).toEqual({ reason: "original" }); // Original unchanged
       expect(modified.id).toBe(original.id); // Same ID
       expect(modified.action).toBe(original.action); // Same action
     });

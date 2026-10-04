@@ -7,12 +7,49 @@
 export { AnchorError, isValidSha256Hex } from "./application/ports/hash-anchor.js";
 export type { AnchorReceipt, HashAnchor } from "./application/ports/hash-anchor.js";
 
+// Funding monitoring: the balance port, its metric and alert shapes, and the
+// stroop arithmetic. The monitor itself stays out — see below.
+export {
+  ANCHOR_TRANSACTION_FEE_STROOPS,
+  BalanceUnavailableError,
+  NullAnchorBalanceMetricSink,
+  STROOPS_PER_XLM,
+  stroopsToXlm,
+  xlmToStroops,
+} from "./application/ports/account-balance.js";
+export type {
+  AnchorAccountBalance,
+  AnchorAccountBalanceReader,
+  AnchorBalanceMetric,
+  AnchorBalanceMetricSink,
+  AnchorFundingAlert,
+  AnchorFundingAlertKind,
+  AnchorFundingAlerter,
+  AnchorFundingGuard,
+} from "./application/ports/account-balance.js";
+
 // The Stellar adapter.
 export { StellarHashAnchor } from "./infrastructure/stellar/stellar-hash-anchor.js";
 export type {
   StellarHashAnchorOptions,
   StellarNetwork,
 } from "./infrastructure/stellar/stellar-hash-anchor.js";
+
+// Funding monitoring against a real Horizon. Exported because an operator
+// wiring a deployment needs both halves: the reader that talks to the ledger
+// and the monitor that decides when to shout.
+export {
+  AnchorBalanceMonitor,
+  DEFAULT_BALANCE_THRESHOLD_XLM,
+  HorizonAccountBalanceReader,
+  isUnderfundedLedgerError,
+  loggingFundingAlerter,
+} from "./infrastructure/balance-monitor.js";
+export type {
+  AnchorBalanceMonitorOptions,
+  AnchorFundingStatus,
+  StructuredErrorLogger,
+} from "./infrastructure/balance-monitor.js";
 
 // Test double, exported deliberately: consumers testing their own anchoring
 // logic need it, and it doubles as the "anchoring disabled" implementation

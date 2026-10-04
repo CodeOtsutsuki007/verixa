@@ -1,5 +1,10 @@
 import { Email, type User } from "@verixa/identity";
-import { AccountLockedError, AuthenticationError, Result } from "@verixa/shared-kernel";
+import {
+  NoopRateLimiter,
+  AccountLockedError,
+  AuthenticationError,
+  Result,
+} from "@verixa/shared-kernel";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { Credential } from "../../domain/entities/credential.js";
@@ -42,9 +47,13 @@ describe("AuthenticateWithPassword — lockout", () => {
   beforeEach(async () => {
     unitOfWork = new InMemoryCredentialsUnitOfWork();
     hasher = new Argon2PasswordHasher(FAST);
-    authenticate = new AuthenticateWithPassword(unitOfWork, hasher, POLICY);
+    authenticate = new AuthenticateWithPassword(unitOfWork, hasher, new NoopRateLimiter(), POLICY);
 
-    const registered = await new RegisterUserWithPassword(unitOfWork, hasher).execute({
+    const registered = await new RegisterUserWithPassword(
+      unitOfWork,
+      hasher,
+      new NoopRateLimiter(),
+    ).execute({
       email: EMAIL,
       displayName: "Alice",
       password: PASSWORD,
@@ -158,7 +167,12 @@ describe("AuthenticateWithPassword — lockout", () => {
         },
         needsRehash: (encodedHash) => hasher.needsRehash(encodedHash),
       };
-      const useCase = new AuthenticateWithPassword(unitOfWork, counting, POLICY);
+      const useCase = new AuthenticateWithPassword(
+        unitOfWork,
+        counting,
+        new NoopRateLimiter(),
+        POLICY,
+      );
 
       for (let attempt = 0; attempt < POLICY.threshold; attempt += 1) {
         await useCase.execute({ email: EMAIL, password: WRONG });

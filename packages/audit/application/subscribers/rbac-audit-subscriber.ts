@@ -1,6 +1,7 @@
 import type { DomainEvent } from "@verixa/shared-kernel";
 
 import type { RecordAuditEventCommand } from "../use-cases/record-audit-event.js";
+
 import { AuditEventSubscriber } from "./audit-event-subscriber.js";
 
 /**
@@ -10,7 +11,7 @@ import { AuditEventSubscriber } from "./audit-event-subscriber.js";
  * When the RBAC package publishes this event, this subscriber will
  * automatically record it in the audit log.
  */
-interface RoleAssignedEvent extends DomainEvent {
+export interface RoleAssignedEvent extends DomainEvent {
   readonly eventName: "rbac.role.assigned";
   readonly userId: string;
   readonly roleId: string;
@@ -26,7 +27,7 @@ interface RoleAssignedEvent extends DomainEvent {
  * When the RBAC package publishes this event, this subscriber will
  * automatically record it in the audit log.
  */
-interface PermissionGrantedEvent extends DomainEvent {
+export interface PermissionGrantedEvent extends DomainEvent {
   readonly eventName: "rbac.permission.granted";
   readonly userId: string;
   readonly permission: string;
