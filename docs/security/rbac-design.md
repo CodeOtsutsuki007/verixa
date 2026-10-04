@@ -85,3 +85,34 @@ To prevent unauthorized privilege escalation when managing roles and assignments
 
 - Route guards (`requirePermission("roles:assign")` / `requirePermission("roles:revoke")`) gate role assignment endpoints.
 - Actor attribution (`assignedBy`, `assignedAt`) is permanently captured on every assignment entity to maintain a complete security audit trail.
+
+---
+
+## 6. Permission Resolution Architecture (`PermissionChecker`) (Issue 134)
+
+### Purpose & Responsibilities
+
+The `PermissionChecker` application service provides the single authoritative engine for evaluating access decisions (`hasPermission`, `hasAnyPermission`, `hasAllPermissions`, and `resolveEffectivePermissions`).
+
+### Deny-by-Default (Fail-Closed Security)
+
+- Any principal without active, non-expired role assignments has an empty effective permission set and is unconditionally denied access (`hasPermission` returns `false`).
+- Empty permission requirements:
+  - `hasAllPermissions` with an empty collection vacuously returns `true`.
+  - `hasAnyPermission` with an empty collection returns `false`.
+
+### Multi-Role Union & Overlapping Permissions
+
+When a user holds multiple active role assignments in a given scope (e.g. `reader` and `writer`), `PermissionChecker` unions the granted permissions across all active roles. Overlapping grants are deduplicated.
+
+### Temporal Filtering
+
+When resolving active assignments, `UserRoleAssignmentRepository` excludes expired assignments based on reference evaluation time `options.now` (`new Date()`). Lapsed temporary elevations immediately cease granting privileges without manual administrative intervention.
+
+### Scope Merging
+
+When evaluating a tenant context (`orgId: OrgId`):
+
+1. `PermissionChecker` resolves all active assignments specifically scoped to `orgId`.
+2. It simultaneously merges system-wide global assignments (`orgId: null`).
+3. It evaluates whether any granted permission matches the required permission (supporting action wildcards such as `admin:*`).
