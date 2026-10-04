@@ -16,6 +16,7 @@ export {
   ValidationError,
 } from "./domain/errors.js";
 export { Result } from "./domain/result.js";
+export { InMemoryEventPublisher } from "./infrastructure/in-memory-event-publisher.js";
 export { createLogger } from "./infrastructure/logger.js";
 export type { CreateLoggerOptions, Logger } from "./infrastructure/logger.js";
 export {

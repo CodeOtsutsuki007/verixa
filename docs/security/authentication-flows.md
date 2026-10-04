@@ -192,13 +192,13 @@ attempt earns a longer next lock.
 
 All abuse-sensitive endpoints consult the `RateLimiter` port before executing:
 
-| Flow | Action Key | Identifier |
-|------|-----------|------------|
-| Login | `login` | email address |
-| Register | `register` | email address |
-| Password Reset Request | `password-reset` | email address |
-| Password Reset Confirmation | `password-reset` | reset token |
-| Email Verification | `email-verification` | email address |
+| Flow                        | Action Key           | Identifier    |
+| --------------------------- | -------------------- | ------------- |
+| Login                       | `login`              | email address |
+| Register                    | `register`           | email address |
+| Password Reset Request      | `password-reset`     | email address |
+| Password Reset Confirmation | `password-reset`     | reset token   |
+| Email Verification          | `email-verification` | email address |
 
 ### Current Implementation
 
@@ -535,3 +535,22 @@ belongs.
 - `docs/security/password-storage.md` — argon2id parameters, the PHC format,
   and why the hash is self-describing.
 - `docs/security/token-storage.md` — how tokens are stored once they exist.
+
+## Admin-Assisted MFA Recovery Flow
+
+When a user has lost all MFA methods and backup codes, an administrator initiates recovery via `RecoverMfaAccess`. The flow is:
+
+1. Admin authenticates separately (outside this use case) and constructs a recovery command with their `actorAdminId` and a written `reason`.
+2. Use case validates the command (non-empty actor, non-empty reason) and emits `mfa.recovery.initiated` to the audit log.
+3. All active and pending MFA methods for the target user are disabled.
+4. All active sessions for the target user are revoked via `SessionRevoker`.
+5. Use case emits `mfa.recovery.completed` with counts.
+6. On the user's next login, the MFA enforcement policy detects no active methods and gates on re-enrollment.
+
+The recovery cannot be self-triggered: the use case always requires a non-empty `actorAdminId` distinct from the user, enforcing that a human admin with elevated access authorises each recovery event.
+
+- `docs/guides/use-cases.md` — the reviewer-decision use cases, why a
+  rationale note is mandatory on every approval or rejection, and why the
+  claim and status-transition rules live on the aggregate rather than in the
+  use case. A verification decision is recorded attribution plus reason for
+  the same auditability this document argues for on the authentication side.

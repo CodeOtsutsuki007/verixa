@@ -111,3 +111,13 @@ export {
   PrismaEmailVerificationTokenRepository,
   PrismaPasswordResetTokenRepository,
 } from "./infrastructure/persistence/prisma-verification-token-repositories.js";
+
+// Testing fakes. Exported so contexts built on top of credentials can test
+// their own use cases against fake credential repositories, rather than each
+// re-implementing one that drifts.
+export { InMemoryCredentialRepository } from "./infrastructure/testing/in-memory-credential-repository.js";
+export { InMemoryCredentialsUnitOfWork } from "./infrastructure/testing/in-memory-credentials-unit-of-work.js";
+export {
+  InMemoryEmailVerificationTokenRepository,
+  InMemoryPasswordResetTokenRepository,
+} from "./infrastructure/testing/in-memory-verification-token-repositories.js";

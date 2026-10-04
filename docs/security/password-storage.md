@@ -262,6 +262,84 @@ Worth stating, because assuming otherwise is how gaps appear:
 - **It does not log.** Nothing here should ever appear in a log line. A
   password reaching a logger is a disclosure regardless of what happens next.
 
+## Dormant accounts: the password upgrade gap
+
+Cost parameters must rise as hardware improves, but existing hashes cannot be recomputed without
+the plaintext. The upgrade path above (successful login checking `needsRehash` and upgrading)
+handles accounts that log in. **It does not handle dormant, seasonal, or rare accounts whose
+hash sits at whatever cost parameters were current when they last logged in, potentially years
+out of date.**
+
+For these accounts, the plaintext never arrives — there is no login moment to catch it in. Three
+approaches exist:
+
+### Approach 1: Hash-over-Hash (Rejected)
+
+Store `argon2(current_params, existing_hash)`, record that a wrapping layer exists (schema field),
+and update the verify path to apply layers in order.
+
+**Pro:** Upgrades every dormant account with no user involvement. Closes the gap completely.
+
+**Con:** Introduces significant operational complexity:
+
+- Schema change to track wrapping layers (versioning problem)
+- Verify path becomes stateful — must apply layers in correct order
+- Creates future migration debt if the wrapping scheme needs to change
+- No existing patterns in this codebase for layered hashing operations
+- One miscalculation at the verify layer can lock users out of their own accounts permanently
+
+**Why rejected:** This codebase has no background job infrastructure, no existing patterns for
+layered operations, and is at early production maturity. The complexity is real and doesn't pay
+for itself until the measurement reveals the problem is severe enough to warrant it. Start with
+visibility first.
+
+### Approach 2: Forced Reset After Staleness Threshold (Rejected)
+
+Invalidate hashes below a parameter generation/age threshold and route the owner through password
+reset.
+
+**Pro:** Simple, unambiguous, produces a genuinely fresh hash. Existing password-reset
+infrastructure is ready (Issue 069).
+
+**Con:** Sends unsolicited password-reset emails to dormant accounts, which reads as a phishing
+attempt and trains users to distrust password-reset emails from this product.
+
+**Important distinction:** This is NOT routine password rotation (which NIST 800-63B explicitly
+argues against). This is a one-time security-parameter catch-up for accounts that structurally
+cannot be caught any other way. However, the operational cost is real: it requires building a
+background job or mass-email system that does not exist yet. Premature infrastructure investment
+for an uncertain problem.
+
+**Why rejected:** Requires background job infrastructure that doesn't exist yet. The UX cost
+(unsolicited security emails) is real and should only be paid if measurement shows the gap is
+severe. Building jobs for this single purpose is premature.
+
+### Approach 3: Do Nothing, Deliberately Measure (Chosen)
+
+Accept the gap as a known, quantified engineering position rather than an unmeasured one. Add a
+query/metric exposing:
+
+- Count of credentials below current cost parameters
+- Age distribution: oldest credential, median age, distribution if applicable
+
+**Pro:** Honest about the gap. Turns unknown into known. Measurement enables better future
+decisions. Requires minimal code and no new infrastructure.
+
+**Con:** Does not close the gap immediately. Dormant accounts remain at older cost parameters
+until (if) one of the other approaches is implemented later.
+
+**Why chosen:** At early production maturity (no background job system, no metrics infrastructure),
+measurement is the appropriate response. Once the measurement lands:
+
+- If the gap is small (few old accounts), it doesn't warrant the complexity of Options 1 or 2.
+- If the gap is large, the team has data to justify building background jobs for Option 2 or
+  committing to the layered-hash complexity of Option 1.
+- If background jobs are built for other reasons (audit log retention, Phase 24), Option 2 becomes
+  cheap to add.
+
+The measurement query is a fully acceptable outcome per the issue requirements, and it is the
+right call for this stage of the product.
+
 ## Review checklist
 
 For any PR touching credentials:
