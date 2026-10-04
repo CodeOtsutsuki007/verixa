@@ -167,6 +167,24 @@ jobs:
       - name: Identity coverage gate
         run: pnpm --filter @verixa/identity run test:coverage
 
+      # packages/credentials is the second fully-built bounded context,
+      # following the Phase 02 coverage-gate pattern established in Issue 037.
+      # Enforced separately from the plain `pnpm test` above to keep coverage
+      # collection overhead isolated to contexts that require it.
+      - name: Credentials coverage gate
+        run: pnpm --filter @verixa/credentials run test:coverage
+
+      # packages/audit is the third context under the Phase 02 coverage-gate
+      # pattern (Issue 037), applied in Issue 197. The floor matters more here
+      # than anywhere else in the monorepo: this is the code that decides
+      # whether tampering is *detectable*, and an untested branch in chain
+      # verification is a security property that silently does not hold. The
+      # gate excludes the Prisma adapters and the operator CLI for the reason
+      # stated in packages/audit/vitest.config.ts — they need a live Postgres,
+      # and are covered by the database-backed suite instead.
+      - name: Audit coverage gate
+        run: pnpm --filter @verixa/audit run test:coverage
+
   # Verifies the *other* database strategy. The `ci` job above points
   # TEST_DATABASE_URL at a service container, so it never exercises the
   # Testcontainers path in database-harness.ts (Issue 047). This job
@@ -220,10 +238,13 @@ jobs:
       - name: Re-link workspace packages
         run: pnpm install --frozen-lockfile
 
-      # Only the identity package: it owns the Prisma repository contract
-      # suite, which is what actually needs a database here.
-      - name: Run repository contract tests against a Testcontainers Postgres
+      # These packages own Prisma repository contract suites that need a
+      # real database.
+      - name: Run identity repository contract tests against Testcontainers Postgres
         run: pnpm --filter @verixa/identity run test
+
+      - name: Run authorization repository contract tests against Testcontainers Postgres
+        run: pnpm --filter @verixa/authorization run test
 
   # Verifies the *compose* stack's database roles, which nothing else covers.
   #

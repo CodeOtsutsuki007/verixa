@@ -1,5 +1,5 @@
 import { Email, type User } from "@verixa/identity";
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { PasswordResetToken } from "../../domain/entities/password-reset-token.js";
@@ -60,10 +60,14 @@ describe("password reset (Issues 069 and 070)", () => {
     notifier = new CapturingNotifier();
     revoker = new RecordingSessionRevoker();
     hasher = new Argon2PasswordHasher(FAST);
-    request = new RequestPasswordReset(unitOfWork, notifier);
-    confirm = new ConfirmPasswordReset(unitOfWork, hasher, revoker);
+    request = new RequestPasswordReset(unitOfWork, notifier, new NoopRateLimiter());
+    confirm = new ConfirmPasswordReset(unitOfWork, hasher, revoker, new NoopRateLimiter());
 
-    const registered = await new RegisterUserWithPassword(unitOfWork, hasher).execute({
+    const registered = await new RegisterUserWithPassword(
+      unitOfWork,
+      hasher,
+      new NoopRateLimiter(),
+    ).execute({
       email: EMAIL,
       displayName: "Alice",
       password: PASSWORD,
@@ -162,7 +166,7 @@ describe("password reset (Issues 069 and 070)", () => {
 
       expect(Result.isOk(result)).toBe(true);
 
-      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher);
+      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher, new NoopRateLimiter());
       await expect(
         authenticate
           .execute({ email: EMAIL, password: NEW_PASSWORD })
@@ -174,7 +178,7 @@ describe("password reset (Issues 069 and 070)", () => {
       const rawToken = await issueToken();
       await confirm.execute({ token: rawToken, newPassword: NEW_PASSWORD });
 
-      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher);
+      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher, new NoopRateLimiter());
       const result = await authenticate.execute({ email: EMAIL, password: PASSWORD });
 
       expect(Result.isErr(result)).toBe(true);
@@ -233,7 +237,7 @@ describe("password reset (Issues 069 and 070)", () => {
     });
 
     it("rejects an expired token", async () => {
-      const shortLived = new RequestPasswordReset(unitOfWork, notifier, -1);
+      const shortLived = new RequestPasswordReset(unitOfWork, notifier, new NoopRateLimiter(), -1);
       await shortLived.execute({ email: EMAIL });
       const rawToken = notifier.resets.at(-1)?.rawToken ?? "";
 
@@ -259,7 +263,7 @@ describe("password reset (Issues 069 and 070)", () => {
       const used = await issueToken();
       await confirm.execute({ token: used, newPassword: NEW_PASSWORD });
 
-      const shortLived = new RequestPasswordReset(unitOfWork, notifier, -1);
+      const shortLived = new RequestPasswordReset(unitOfWork, notifier, new NoopRateLimiter(), -1);
       await shortLived.execute({ email: EMAIL });
       const expired = notifier.resets.at(-1)?.rawToken ?? "";
 
@@ -307,6 +311,92 @@ describe("password reset (Issues 069 and 070)", () => {
       const after = await unitOfWork.repositories.credentials.findByUserId(user.id);
       expect(after?.failedAttempts).toBe(0);
       expect(after?.lockedUntil).toBeUndefined();
+    });
+
+    // ── ISSUE 072: Password history / reuse prevention ──────────────────
+
+    it("rejects reuse of current password during reset", async () => {
+      // A user resets their password but tries to set it back to the current one.
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // same as current
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.fieldErrors["password"]).toContain("reused");
+    });
+
+    it("rejects reuse of a password from history", async () => {
+      // Set up a credential with password history
+      const user = await loadUser();
+      const credential = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      if (credential === undefined) throw new Error("fixture setup failed");
+
+      // Manually inject an old password into history to simulate prior rotations
+      const tempNew = await hasher.hash("TemporaryPassword1!");
+      const withHistory = credential.rotatePassword(tempNew, { depth: 5 });
+      await unitOfWork.repositories.credentials.save(withHistory);
+
+      // Now try to reset back to the old password
+      const rawToken = await issueToken();
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // This was the original password (in history now)
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.fieldErrors["password"]).toContain("reused");
+    });
+
+    it("accepts a new password not in history", async () => {
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: NEW_PASSWORD, // completely new password
+      });
+
+      expect(Result.isOk(result)).toBe(true);
+
+      // Verify the new password works
+      const authenticate = new AuthenticateWithPassword(unitOfWork, hasher, new NoopRateLimiter());
+      await expect(
+        authenticate
+          .execute({ email: EMAIL, password: NEW_PASSWORD })
+          .then((outcome) => Result.isOk(outcome)),
+      ).resolves.toBe(true);
+    });
+
+    it("maintains password history after successful reset", async () => {
+      const user = await loadUser();
+      const originalCredential = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      if (originalCredential === undefined) throw new Error("fixture setup failed");
+
+      const rawToken = await issueToken();
+      await confirm.execute({
+        token: rawToken,
+        newPassword: NEW_PASSWORD,
+      });
+
+      const updated = await unitOfWork.repositories.credentials.findByUserId(user.id);
+      expect(updated?.passwordHistory).toContain(originalCredential.passwordHash);
+    });
+
+    it("reuse error message includes history depth", async () => {
+      const rawToken = await issueToken();
+
+      const result = await confirm.execute({
+        token: rawToken,
+        newPassword: PASSWORD, // reuse
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (!Result.isErr(result)) return;
+      expect(result.error.message).toContain("5"); // default depth
     });
   });
 });

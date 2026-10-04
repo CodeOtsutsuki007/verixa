@@ -1,5 +1,6 @@
 import { DisplayName, Email, PersonName, User } from "@verixa/identity";
 import { ConflictError, NotFoundError, Result, ValidationError } from "@verixa/shared-kernel";
+import type { RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
 
 import { Credential } from "../../domain/entities/credential.js";
 import { type PasswordPolicy, RawPassword } from "../../domain/value-objects/raw-password.js";
@@ -29,18 +30,36 @@ export type RegisterUserWithPasswordError = ValidationError | ConflictError | No
  * from identity arrives through `@verixa/identity`'s public API, and identity
  * has no idea this package exists.
  *
+ * Rate limiting is consulted at the start via the {@link RateLimiter} port,
+ * and reset on successful registration to prevent registration abuse.
+ *
  * See `docs/guides/use-cases.md`.
  */
 export class RegisterUserWithPassword {
   constructor(
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly passwordHasher: PasswordHasher,
+    private readonly rateLimiter: RateLimiter,
     private readonly passwordPolicy?: PasswordPolicy,
   ) {}
 
   async execute(
     command: RegisterUserWithPasswordCommand,
   ): Promise<Result<RegisterUserWithPasswordResult, RegisterUserWithPasswordError>> {
+    // 1. Check rate limit BEFORE any other logic
+    const rateLimitKey: RateLimitKey = {
+      action: "register",
+      identifier: command.email,
+    };
+
+    const limitResult = await this.rateLimiter.check(rateLimitKey);
+    if (!limitResult.allowed) {
+      throw new Error(
+        `Rate limit exceeded for ${rateLimitKey.action} on ${rateLimitKey.identifier}. ` +
+          `Resets at ${new Date(limitResult.resetAt).toISOString()}`,
+      );
+    }
+
     // Every input is validated before the transaction opens, and before the
     // password is hashed. Two reasons, in order of importance:
     //
@@ -78,7 +97,7 @@ export class RegisterUserWithPassword {
     // thing the request does, and it needs no database.
     const passwordHash = await this.passwordHasher.hash(passwordResult.value.reveal());
 
-    return this.unitOfWork.run(async (repositories) => {
+    const result = await this.unitOfWork.run(async (repositories) => {
       // Re-checked inside the transaction rather than before it. Checking
       // outside would leave a window where two concurrent registrations for
       // the same address both see "available" and both proceed — the second
@@ -105,5 +124,12 @@ export class RegisterUserWithPassword {
 
       return Result.ok({ user, credential });
     });
+
+    // Reset rate limit counter on successful registration
+    if (Result.isOk(result)) {
+      await this.rateLimiter.reset(rateLimitKey);
+    }
+
+    return result;
   }
 }

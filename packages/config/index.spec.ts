@@ -21,6 +21,8 @@ describe("loadConfig", () => {
       DATABASE_POOL_SIZE: 10,
       DATABASE_POOL_TIMEOUT_SECONDS: 10,
       SESSION_MAX_CONCURRENT_SESSIONS: 0,
+      MFA_ENFORCEMENT_LEVEL: "optional",
+      MFA_ALLOWED_METHODS: [],
     });
   });
 
@@ -43,6 +45,8 @@ describe("loadConfig", () => {
       DATABASE_POOL_SIZE: 10,
       DATABASE_POOL_TIMEOUT_SECONDS: 10,
       SESSION_MAX_CONCURRENT_SESSIONS: 0,
+      MFA_ENFORCEMENT_LEVEL: "optional",
+      MFA_ALLOWED_METHODS: [],
     });
   });
 

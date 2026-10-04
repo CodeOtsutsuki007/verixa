@@ -12,7 +12,7 @@ export type ConfirmTotpEnrollmentError = Error | AccountLockedError | Validation
 
 /**
  * Verifies a user-submitted TOTP code against a pending method's secret.
- * 
+ *
  * If the code matches, the method is transitioned to 'active' and can be used
  * for authentication. If incorrect, the method remains 'pending' and the failure
  * is recorded to enforce rate limits (protecting against guessing attacks in the
@@ -24,7 +24,9 @@ export class ConfirmTotpEnrollment {
     private readonly totpAlgorithm: TotpAlgorithm,
   ) {}
 
-  async execute(command: ConfirmTotpEnrollmentCommand): Promise<Result<void, ConfirmTotpEnrollmentError>> {
+  async execute(
+    command: ConfirmTotpEnrollmentCommand,
+  ): Promise<Result<void, ConfirmTotpEnrollmentError>> {
     // 1. Validate inputs (code length check helps avoid unnecessary crypto work)
     if (!command.code || command.code.length !== 6) {
       return Result.err(new ValidationError("TOTP code must be 6 digits."));

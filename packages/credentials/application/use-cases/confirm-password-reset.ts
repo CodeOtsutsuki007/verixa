@@ -1,8 +1,13 @@
 import type { User } from "@verixa/identity";
 import { Result, ValidationError } from "@verixa/shared-kernel";
+import type { RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
 
 import { Credential } from "../../domain/entities/credential.js";
 import { PasswordResetToken } from "../../domain/entities/password-reset-token.js";
+import {
+  type PasswordHistoryPolicy,
+  DEFAULT_PASSWORD_HISTORY_POLICY,
+} from "../../domain/value-objects/password-history-policy.js";
 import { type PasswordPolicy, RawPassword } from "../../domain/value-objects/raw-password.js";
 import type { CredentialsUnitOfWork } from "../ports/credentials-unit-of-work.js";
 import type { PasswordHasher } from "../ports/password-hasher.js";
@@ -40,6 +45,12 @@ export interface ConfirmPasswordResetResult {
  * comment saying "remember to revoke sessions when Phase 05 lands" — and that
  * is the comment nobody reads.
  *
+ * ## Rate limiting
+ *
+ * The rate limiter is consulted at the start via the {@link RateLimiter} port
+ * to prevent abuse of the confirmation endpoint. On successful confirmation,
+ * the limit is reset to allow the user to make another attempt if needed.
+ *
  * ## Ordering
  *
  * Token consumed → credential replaced → sessions revoked, all inside one
@@ -55,12 +66,28 @@ export class ConfirmPasswordReset {
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly passwordHasher: PasswordHasher,
     private readonly sessionRevoker: SessionRevoker,
+    private readonly rateLimiter: RateLimiter,
     private readonly passwordPolicy?: PasswordPolicy,
+    private readonly passwordHistoryPolicy: PasswordHistoryPolicy = DEFAULT_PASSWORD_HISTORY_POLICY,
   ) {}
 
   async execute(
     command: ConfirmPasswordResetCommand,
   ): Promise<Result<ConfirmPasswordResetResult, ValidationError>> {
+    // 1. Check rate limit BEFORE any other logic
+    const rateLimitKey: RateLimitKey = {
+      action: "password-reset",
+      identifier: command.token,
+    };
+
+    const limitResult = await this.rateLimiter.check(rateLimitKey);
+    if (!limitResult.allowed) {
+      throw new Error(
+        `Rate limit exceeded for ${rateLimitKey.action} on ${rateLimitKey.identifier}. ` +
+          `Resets at ${new Date(limitResult.resetAt).toISOString()}`,
+      );
+    }
+
     // Policy first, before the token is looked up and before anything is
     // hashed. A rejected password should not consume the user's one-time
     // link — otherwise choosing a too-short password burns the reset and
@@ -109,13 +136,24 @@ export class ConfirmPasswordReset {
       // but a credential deleted between request and confirmation would
       // otherwise strand a valid token against a missing row.
       const existing = await repositories.credentials.findByUserId(user.id);
+
+      // Check for password reuse before updating (Issue 072)
+      if (existing !== undefined) {
+        const isReused = await existing.isPasswordReused(command.newPassword, (plain, hash) =>
+          this.passwordHasher.verify(plain, hash),
+        );
+        if (isReused) {
+          return { kind: "password_reused" as const };
+        }
+      }
+
       const credential =
         existing === undefined
           ? Credential.create({ userId: user.id, passwordHash: newHash })
-          : // `withPasswordHash` also clears the lockout, which matters
-            // exactly here: the failures that locked the account were not the
-            // owner's, and after a reset they have no way to wait one out.
-            existing.withPasswordHash(newHash);
+          : // `rotatePassword` maintains history and clears the lockout, which
+            // matters exactly here: the failures that locked the account were not
+            // the owner's, and after a reset they have no way to wait one out.
+            existing.rotatePassword(newHash, this.passwordHistoryPolicy);
 
       await repositories.credentials.save(credential);
 
@@ -125,6 +163,15 @@ export class ConfirmPasswordReset {
     if (outcome.kind === "invalid") {
       return Result.err(
         new ValidationError("This reset link is not valid.", { token: ["invalid"] }),
+      );
+    }
+
+    if (outcome.kind === "password_reused") {
+      return Result.err(
+        new ValidationError(
+          `Password was recently used. Please choose a password not used in your last ${this.passwordHistoryPolicy.depth} passwords.`,
+          { password: ["reused"] },
+        ),
       );
     }
 
@@ -146,6 +193,9 @@ export class ConfirmPasswordReset {
         ),
       );
     }
+
+    // Reset rate limit counter on successful password reset confirmation
+    await this.rateLimiter.reset(rateLimitKey);
 
     return Result.ok({ user: outcome.user });
   }
