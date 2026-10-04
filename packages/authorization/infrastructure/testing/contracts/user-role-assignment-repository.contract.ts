@@ -14,6 +14,8 @@ const USER_2 = asId<"UserId">("22222222-2222-4222-8222-222222222222");
 const ADMIN = asId<"UserId">("33333333-3333-4333-8333-333333333333");
 const ROLE_A = asId<"RoleId">("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
 const ROLE_B = asId<"RoleId">("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+const ORG_X = asId<"OrgId">("xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx");
+const ORG_Y = asId<"OrgId">("yyyyyyyy-yyyy-4yyy-8yyy-yyyyyyyyyyyy");
 const ORG_X = asId<"OrganizationId">("xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx");
 const ORG_Y = asId<"OrganizationId">("yyyyyyyy-yyyy-4yyy-8yyy-yyyyyyyyyyyy");
 

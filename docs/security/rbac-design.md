@@ -47,3 +47,41 @@ To eliminate this vulnerability, roles flagged with `isSystemRole: true` enforce
 
 - **Proposed:** If `revoke()` or `rename()` is called on a system role, silently return without mutating the entity instead of throwing an error.
 - **Why Rejected:** Silent no-ops create severe operational hazards. An administrator attempting to tighten permissions or retire an obsolete capability would see an apparent success in the UI while the permission remains fully active behind the scenes. Raising a dedicated `SystemRoleImmutableError` (distinguishable from general validation errors) ensures the caller is immediately informed that system roles cannot be degraded.
+
+---
+
+## 4. Role Assignment & Scope Invariants (Issue 133)
+
+### Multi-Tenant Isolation
+
+1. **Tenant-Scoped Roles:** A role created with an explicit `orgId` represents an organization-specific policy (e.g. `billing-manager` for Acme Corp). The `AssignRoleToUser` use case strictly validates that an organization-scoped role can only be assigned within its designated organization. Attempting to assign an Org A role to Org B or assigning it globally (`orgId: null`) is rejected with a `ValidationError`.
+2. **Global Roles:** Roles created with `orgId: null` represent platform-level or cross-tenant templates. They may be assigned either globally (`orgId: null`) for system operators, or bound to a specific tenant scope (`orgId: <OrgId>`) if acting as an organization role template.
+
+### Temporal Elevation & Expiration
+
+Assignments support optional `expiresAt` timestamps for temporary access elevation (e.g., break-glass debugging or on-call rotations).
+
+- Domain rules enforce that `expiresAt` must be strictly in the future relative to `assignedAt`.
+- The `PermissionChecker` application service enforces deny-by-default and filters out expired assignments by default at query time.
+
+### Idempotent Assignment
+
+If `AssignRoleToUser` is invoked for a `(userId, roleId, orgId)` tuple where an active, non-expired assignment already exists, the use case completes idempotently and returns the existing assignment.
+
+---
+
+## 5. Revocation Semantics & Privilege Escalation Prevention
+
+### Dual Revocation Modes
+
+The `RevokeRoleFromUser` use case supports two revocation pathways:
+
+1. **By Assignment ID:** Revokes a specific assignment by its unique `UserRoleAssignmentId`. Returns `NotFoundError` if the assignment does not exist.
+2. **By Composite Key `(userId, roleId, orgId)`:** Locates the active role assignment for the given subject and scope, then removes it. Returns `NotFoundError` if no matching active assignment is found.
+
+### Privilege Escalation Prevention
+
+To prevent unauthorized privilege escalation when managing roles and assignments:
+
+- Route guards (`requirePermission("roles:assign")` / `requirePermission("roles:revoke")`) gate role assignment endpoints.
+- Actor attribution (`assignedBy`, `assignedAt`) is permanently captured on every assignment entity to maintain a complete security audit trail.

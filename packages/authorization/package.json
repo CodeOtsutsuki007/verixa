@@ -17,6 +17,11 @@
     "@verixa/shared-kernel": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.2",
+    "@vitest/coverage-v8": "^2.1.9",
+    "fastify": "^5.12.1",
+    "supertest": "^7.0.0",
     "@verixa/database": "workspace:*",
     "@verixa/shared-kernel": "workspace:*"
   },
