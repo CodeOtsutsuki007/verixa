@@ -14,7 +14,6 @@ describe("authorization domain", () => {
       name: "viewer",
       description: "",
       isSystemRole: false,
-      organizationId: null,
       permissions: ["users:*"],
     });
     expect(role.hasPermission("users:read")).toBe(true);

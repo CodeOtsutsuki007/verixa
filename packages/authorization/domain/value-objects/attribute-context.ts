@@ -58,6 +58,9 @@ function matchesType(value: AttributeValue, type: AttributeValueType): boolean {
  * exception or a grant.
  */
 export class AttributeContext {
+  // Definite-assignment assertions: these are assigned in the constructor via
+  // Object.defineProperty, so they are always set, but a loop over
+  // BAG_NAMES is not something the compiler can follow.
   readonly subject!: AttributeBag;
   readonly resource!: AttributeBag;
   readonly action!: AttributeBag;
@@ -147,6 +150,10 @@ export class AttributeContext {
     return this.getTyped(bag, path, "array");
   }
 
+  /**
+   * Resolves a dotted path (`"resource.ownerId"`) against the four bags.
+   * Only the first segment is a category; the remainder is a literal key.
+   */
   resolve(path: string): AttributeValue | undefined {
     const separatorIndex = path.indexOf(".");
     if (separatorIndex === -1) return undefined;

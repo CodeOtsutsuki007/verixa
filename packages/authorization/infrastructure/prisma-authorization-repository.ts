@@ -13,9 +13,8 @@ import {
 type RoleWithPermissions = {
   id: string;
   name: string;
-  description: string;
+  description: string | null;
   isSystemRole: boolean;
-  organizationId: string | null;
   permissions: { permission: { key: string } }[];
 };
 
@@ -26,16 +25,14 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
     return {
       id: row.id,
       name: row.name,
-      description: row.description,
+      description: row.description ?? "",
       isSystemRole: row.isSystemRole,
-      organizationId: row.organizationId,
       permissions: row.permissions.map((permission) => permission.permission.key),
     };
   }
 
-  async listRoles(organizationId?: string | null): Promise<RoleRecord[]> {
+  async listRoles(): Promise<RoleRecord[]> {
     const rows = await this.prisma.role.findMany({
-      where: organizationId === undefined ? {} : { organizationId: organizationId ?? null },
       include: { permissions: { include: { permission: true } } },
       orderBy: { name: "asc" },
     });
@@ -58,7 +55,6 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
         name: input.name,
         description: input.description,
         isSystemRole: input.isSystemRole,
-        organizationId: input.organizationId,
         createdAt: now,
         updatedAt: now,
       },
@@ -90,10 +86,11 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
   }
 
   async listPermissions(): Promise<{ id: string; key: string; description: string }[]> {
-    return this.prisma.permission.findMany({
+    const rows = await this.prisma.permission.findMany({
       select: { id: true, key: true, description: true },
       orderBy: { key: "asc" },
     });
+    return rows.map((row) => ({ ...row, description: row.description ?? "" }));
   }
 
   async grantPermission(roleId: string, key: string): Promise<RoleRecord> {
@@ -126,11 +123,11 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
     return (await this.getRole(roleId))!;
   }
 
-  async listAssignments(userId: string, organizationId?: string | null): Promise<RoleAssignment[]> {
+  async listAssignments(userId: string, organizationId?: string): Promise<RoleAssignment[]> {
     const rows = await this.prisma.userRoleAssignment.findMany({
       where: {
         userId,
-        ...(organizationId === undefined ? {} : { organizationId: organizationId ?? null }),
+        ...(organizationId === undefined ? {} : { organizationId }),
       },
       orderBy: { assignedAt: "desc" },
     });
@@ -144,7 +141,7 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
       where: {
         userId: input.userId,
         roleId: input.roleId,
-        organizationId: input.organizationId ?? null,
+        organizationId: input.organizationId,
         OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
     });
@@ -163,11 +160,12 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
     organizationId: string | null,
     key: string,
   ): Promise<boolean> {
+    if (organizationId === null) return false;
     const rows = await this.prisma.userRoleAssignment.findMany({
       where: {
         userId,
-        OR: [{ organizationId }, { organizationId: null }],
-        AND: [{ OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] }],
+        organizationId,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: { role: { include: { permissions: { include: { permission: true } } } } },
     });
@@ -175,9 +173,8 @@ export class PrismaAuthorizationRepository implements AuthorizationRepository {
       new Role({
         id: row.role.id,
         name: row.role.name,
-        description: row.role.description,
+        description: row.role.description ?? "",
         isSystemRole: row.role.isSystemRole,
-        organizationId: row.role.organizationId,
         permissions: row.role.permissions.map((permission) => permission.permission.key),
       }).hasPermission(key),
     );

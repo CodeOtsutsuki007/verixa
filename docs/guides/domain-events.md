@@ -164,3 +164,23 @@ crosses the boundary.
 audit trail — see `docs/guides/use-cases.md`).
 
 This table grows as later issues add events for other aggregates.
+
+## Audit subscribers
+
+`IdentityCredentialsAuditSubscriber` in `@verixa/audit` is the first downstream
+consumer of the publisher port. The composition root supplies the in-process
+`DomainEventPublisher` and the `RecordAuditEvent` use case; identity and
+credentials do not import audit or call it directly.
+
+The subscriber registers one handler for each identity event currently present
+and for the credential event names planned by Phases 02–04. A supported event
+is translated into exactly one audit action, with the aggregate id becoming
+the subject id. Fields are copied into the flat string metadata map only when
+they are strings; the subscriber does not serialize an arbitrary event object
+into the audit log.
+
+An audit write failure is reported to the supplied error handler and is not
+allowed to reject the publisher callback. This is intentional: audit is a
+downstream record of an operation that has already happened. Turning a failed
+audit insert into a failed registration would give callers a false result and
+would couple the identity and credentials contexts back to audit persistence.

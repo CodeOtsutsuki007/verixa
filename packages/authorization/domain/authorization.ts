@@ -31,7 +31,6 @@ export interface RoleRecord {
   name: string;
   description: string;
   isSystemRole: boolean;
-  organizationId: string | null;
   permissions: string[];
 }
 
@@ -39,7 +38,7 @@ export interface RoleAssignment {
   id: string;
   userId: string;
   roleId: string;
-  organizationId: string | null;
+  organizationId: string;
   assignedAt: Date;
   assignedBy: string | null;
   expiresAt: Date | null;

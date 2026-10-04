@@ -21,7 +21,6 @@ interface RoleQuery {
 interface CreateRoleBody {
   name: string;
   description: string;
-  organizationId?: string;
 }
 interface UpdateRoleBody {
   name?: string;
@@ -101,9 +100,9 @@ export function registerAdminAuthorizationRoutes<TLogger extends FastifyBaseLogg
     return true;
   };
 
-  app.get<{ Querystring: RoleQuery }>("/admin/roles", async (request, reply) => {
+  app.get("/admin/roles", async (request, reply) => {
     if (!(await requirePermission(request, reply, "roles:read"))) return;
-    return authorization.listRoles(request.query.organizationId);
+    return authorization.listRoles();
   });
   app.post<{ Body: CreateRoleBody }>("/admin/roles", async (request, reply) => {
     if (!(await requirePermission(request, reply, "roles:write"))) return;
@@ -113,7 +112,6 @@ export function registerAdminAuthorizationRoutes<TLogger extends FastifyBaseLogg
     try {
       const role = await authorization.createRole({
         ...request.body,
-        organizationId: request.body.organizationId ?? null,
         isSystemRole: false,
       });
       return reply.code(201).send(role);
@@ -171,7 +169,15 @@ export function registerAdminAuthorizationRoutes<TLogger extends FastifyBaseLogg
     "/admin/users/:userId/roles",
     async (request, reply) => {
       if (!(await requirePermission(request, reply, "roles:read"))) return;
-      return authorization.listAssignments(request.params.userId, request.query.organizationId);
+      const callerOrganizationId = header(request, "x-organization-id");
+      if (
+        callerOrganizationId === undefined ||
+        (request.query.organizationId !== undefined &&
+          request.query.organizationId !== callerOrganizationId)
+      ) {
+        return reply.code(403).send({ error: "Forbidden" });
+      }
+      return authorization.listAssignments(request.params.userId, callerOrganizationId);
     },
   );
   app.post<{ Params: UserParams; Body: AssignmentBody }>(
@@ -180,6 +186,11 @@ export function registerAdminAuthorizationRoutes<TLogger extends FastifyBaseLogg
       if (!(await requirePermission(request, reply, "roles:write"))) return;
       try {
         const actorId = header(request, "x-user-id");
+        const callerOrganizationId = header(request, "x-organization-id");
+        const organizationId = request.body.organizationId ?? callerOrganizationId;
+        if (organizationId === undefined || organizationId !== callerOrganizationId) {
+          return reply.code(403).send({ error: "Forbidden" });
+        }
         const targetRole = await authorization.getRole(request.body.roleId);
         if (targetRole === undefined) return reply.code(404).send({ error: "Role not found" });
         if (actorId === request.params.userId) {
@@ -197,7 +208,7 @@ export function registerAdminAuthorizationRoutes<TLogger extends FastifyBaseLogg
         const assignment = await authorization.assignRole({
           userId: request.params.userId,
           roleId: request.body.roleId,
-          organizationId: request.body.organizationId ?? null,
+          organizationId,
           assignedBy: header(request, "x-user-id") ?? null,
           expiresAt: request.body.expiresAt === undefined ? null : new Date(request.body.expiresAt),
         });

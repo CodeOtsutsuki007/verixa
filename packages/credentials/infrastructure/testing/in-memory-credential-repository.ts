@@ -22,7 +22,7 @@ export class InMemoryCredentialRepository implements CredentialRepository {
     return Promise.resolve();
   }
 
-  async getStaleCredentialMetrics(currentHasher: {
+  getStaleCredentialMetrics(currentHasher: {
     needsRehash(encodedHash: string): boolean;
   }): Promise<StaleCredentialMetrics> {
     const staleCreatedAts = Array.from(this.byUserId.values())
@@ -31,12 +31,12 @@ export class InMemoryCredentialRepository implements CredentialRepository {
       .sort((a, b) => a.getTime() - b.getTime());
 
     if (staleCreatedAts.length === 0) {
-      return {
+      return Promise.resolve({
         count: 0,
         oldestCreatedAt: null,
         medianCreatedAt: null,
         p95CreatedAt: null,
-      };
+      });
     }
 
     const count = staleCreatedAts.length;
@@ -48,11 +48,13 @@ export class InMemoryCredentialRepository implements CredentialRepository {
     const p95Index = Math.floor(0.95 * (count - 1));
     const p95CreatedAt = staleCreatedAts[p95Index];
 
-    return {
+    // Indexing an array yields `T | undefined` under
+    // noUncheckedIndexedAccess; the metric contract uses `null` for absent.
+    return Promise.resolve({
       count,
-      oldestCreatedAt,
-      medianCreatedAt,
-      p95CreatedAt,
-    };
+      oldestCreatedAt: oldestCreatedAt ?? null,
+      medianCreatedAt: medianCreatedAt ?? null,
+      p95CreatedAt: p95CreatedAt ?? null,
+    });
   }
 }

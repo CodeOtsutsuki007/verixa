@@ -47,26 +47,18 @@ export async function seedDefaultRoles(prisma: PrismaClient): Promise<void> {
     permissions.set(key, permission.id);
   }
   for (const definition of DEFAULT_ROLES) {
-    const existing = await prisma.role.findFirst({
-      where: { organizationId: null, name: definition.name },
+    const role = await prisma.role.upsert({
+      where: { name: definition.name },
+      create: {
+        id: randomUUID(),
+        name: definition.name,
+        description: definition.description,
+        isSystemRole: true,
+        createdAt: now,
+        updatedAt: now,
+      },
+      update: { description: definition.description, isSystemRole: true, updatedAt: now },
     });
-    const role =
-      existing === null
-        ? await prisma.role.create({
-            data: {
-              id: randomUUID(),
-              name: definition.name,
-              description: definition.description,
-              isSystemRole: true,
-              organizationId: null,
-              createdAt: now,
-              updatedAt: now,
-            },
-          })
-        : await prisma.role.update({
-            where: { id: existing.id },
-            data: { description: definition.description, isSystemRole: true, updatedAt: now },
-          });
     for (const key of definition.permissions) {
       const permissionId = permissions.get(key);
       if (permissionId === undefined) throw new Error(`Missing seeded permission ${key}`);

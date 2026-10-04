@@ -42,6 +42,16 @@ const CREDENTIALS = {
   displayName: "Smoke",
 };
 
+/**
+ * What `/auth/login` accepts.
+ *
+ * The login schema is `additionalProperties: false` and takes only an email
+ * and a password, so posting the registration payload to it is a 400 rather
+ * than a login -- which is the schema doing its job, not a bug. Registration
+ * needs a display name; signing in does not.
+ */
+const LOGIN = { email: CREDENTIALS.email, password: CREDENTIALS.password };
+
 const occurredAt = new Date("2026-01-01T09:00:00.000Z");
 
 function sessionCreated(userId: string): SessionCreatedEvent {
@@ -125,7 +135,7 @@ describe.skipIf(!available)("audit subscribers at composition", () => {
     const registered = await client.request.post("/auth/register").send(CREDENTIALS);
     expect(registered.status).toBe(201);
 
-    const response = await client.request.post("/auth/login").send(CREDENTIALS);
+    const response = await client.request.post("/auth/login").send(LOGIN);
     expect(response.status).toBe(200);
 
     const entries = await prisma.auditLogEntry.findMany({ orderBy: { sequence: "asc" } });
@@ -141,7 +151,7 @@ describe.skipIf(!available)("audit subscribers at composition", () => {
 
   it("leaves a chain that verifies after the login was recorded", async () => {
     await client.request.post("/auth/register").send(CREDENTIALS);
-    await client.request.post("/auth/login").send(CREDENTIALS);
+    await client.request.post("/auth/login").send(LOGIN);
 
     const result = await container.audit.verifyChain.execute();
 

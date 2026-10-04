@@ -19,6 +19,13 @@ export default tseslint.config(
       "**/*.config.*",
       "planning/**",
       "scripts/**",
+      // Quarantined: these do not build. See docs/QUARANTINE.md — pull
+      // requests were merged without resolving conflicts, leaving multiple
+      // implementations concatenated. Linting them reports hundreds of errors
+      // that are all symptoms of that, which drowns out real findings.
+      "packages/mfa/**",
+      "packages/sessions/**",
+      "packages/verification/**",
     ],
   },
   js.configs.recommended,

@@ -499,6 +499,7 @@ The first concrete use case, `RegisterUser`
 (`packages/identity/application/use-cases/register-user.ts`), establishes
 the application layer's command-handler pattern: see
 `docs/guides/use-cases.md` for the full shape and rationale.
+
 ## MFA Secret Storage (Issue 107)
 
 Unlike passwords, which are one-way hashed using a slow KDF (Argon2), TOTP secrets must be decryptable by the server to compute expected verification codes during login. This fundamental difference requires a separate storage strategy: symmetric encryption (AES-256-GCM) with a managed key.
@@ -558,6 +559,7 @@ before their account was removed can matter for incident investigation.
 `Restrict` forces the caller to revoke assignments explicitly before deleting
 the user, making the intent visible in the audit log rather than silently
 cleaning up evidence.
+
 ## Review Queue Assignment & Optimistic Leases (Issue 173)
 
 When managing human review queues for identity verification requests, preventing two reviewers from working the same case simultaneously is critical. We modeled this using an explicit `ReviewAssignment` value object/entity that implements an **optimistic lease** (time-bounded claim) rather than a permanent lock.

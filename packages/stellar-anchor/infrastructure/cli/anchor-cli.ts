@@ -1,7 +1,10 @@
 #!/usr/bin/env node
+import { Keypair } from "@stellar/stellar-sdk";
 import { Result } from "@verixa/shared-kernel";
 
+import { stroopsToXlm, type AnchorFundingAlert } from "../../application/ports/account-balance.js";
 import { isValidSha256Hex } from "../../application/ports/hash-anchor.js";
+import { AnchorBalanceMonitor, HorizonAccountBalanceReader } from "../balance-monitor.js";
 import { StellarHashAnchor, type StellarNetwork } from "../stellar/stellar-hash-anchor.js";
 
 /**
@@ -23,10 +26,16 @@ const USAGE = `
 Usage:
   anchor  <sha256-hex>                 Anchor a hash to Stellar (requires STELLAR_ANCHOR_SECRET_KEY)
   verify  <sha256-hex> <anchor-ref>    Check that a Stellar transaction commits to a hash
+  balance                              Report the anchoring account's balance as a metric line
 
 Environment:
   STELLAR_ANCHOR_SECRET_KEY   Secret key (S...) of the anchoring account. Required for "anchor".
+  STELLAR_ANCHOR_PUBLIC_KEY   Account to report in "balance", if the secret key is not available.
   STELLAR_NETWORK             "testnet" (default) or "public".
+  STELLAR_ANCHOR_MIN_XLM      Alert threshold in XLM for "balance". Defaults to 1.
+
+"balance" exits 0 when funded, 1 below the threshold, and 2 when the account
+cannot cover a fee, the balance is unreadable, or Horizon is unreachable.
 `.trim();
 
 function fail(message: string): never {
@@ -42,8 +51,74 @@ function resolveNetwork(): StellarNetwork {
   return value;
 }
 
+/**
+ * Prints the anchoring account's balance as one structured metric line and
+ * exits non-zero when the account is running down, so the same command can be
+ * a dashboard input and a cron probe.
+ *
+ * Reads the account with `STELLAR_ANCHOR_PUBLIC_KEY` when it is available: a
+ * funding check has no need for a signing key, and the process that watches
+ * the account should not be the process that can spend it. The secret key is
+ * accepted only as a fallback, deriving the public one from it.
+ */
+async function reportBalance(): Promise<never> {
+  const network = resolveNetwork();
+  const thresholdXlm = Number(process.env["STELLAR_ANCHOR_MIN_XLM"] ?? "1");
+  if (!Number.isFinite(thresholdXlm) || thresholdXlm < 0) {
+    fail("STELLAR_ANCHOR_MIN_XLM must be a non-negative number of XLM.");
+  }
+
+  const secretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
+  const publicKey =
+    process.env["STELLAR_ANCHOR_PUBLIC_KEY"] ??
+    (secretKey === undefined || secretKey.length === 0
+      ? undefined
+      : Keypair.fromSecret(secretKey).publicKey());
+
+  if (publicKey === undefined) {
+    fail(
+      "balance needs STELLAR_ANCHOR_PUBLIC_KEY (preferred) or STELLAR_ANCHOR_SECRET_KEY to derive it from.",
+    );
+  }
+
+  const alerts: AnchorFundingAlert[] = [];
+  const monitor = new AnchorBalanceMonitor({
+    reader: new HorizonAccountBalanceReader({ network }),
+    publicKey,
+    thresholdXlm,
+    alerter: { alert: (alert) => void alerts.push(alert) },
+  });
+
+  const status = await monitor.check();
+
+  console.log(
+    JSON.stringify({
+      name: "verixa_stellar_anchor_balance_xlm",
+      network,
+      publicKey,
+      status: status.kind,
+      availableXlm:
+        status.kind === "unknown" ? undefined : stroopsToXlm(status.balance.availableStroops),
+      thresholdXlm,
+    }),
+  );
+
+  for (const alert of alerts) {
+    console.error(`ALERT ${alert.kind}: ${alert.message}`);
+  }
+
+  // 0 funded, 1 below the alert threshold, 2 cannot pay a fee or cannot be
+  // read at all — the difference lets a probe distinguish "top it up soon"
+  // from "anchoring is not happening", which are different urgencies.
+  process.exit(status.kind === "funded" ? 0 : status.kind === "below_threshold" ? 1 : 2);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
+
+  if (command === "balance") {
+    await reportBalance();
+  }
 
   if (command !== "anchor" && command !== "verify") {
     fail(USAGE);

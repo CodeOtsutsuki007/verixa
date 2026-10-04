@@ -4,7 +4,7 @@ import { AttributeContext } from "./attribute-context.js";
 
 describe("AttributeContext", () => {
   const date = new Date("2026-09-30T12:00:00.000Z");
-  const context = new AttributeContext({
+  const context = AttributeContext.create({
     subject: { id: "user-1", age: 30, active: true, roles: ["reader"], createdAt: date },
     resource: { owner: { id: "user-1" } },
     action: { name: "read" },
@@ -31,7 +31,7 @@ describe("AttributeContext", () => {
 
   it("copies and freezes input so callers cannot mutate the context", () => {
     const source = { subject: { roles: ["reader"] } };
-    const immutable = new AttributeContext(source);
+    const immutable = AttributeContext.create(source);
     source.subject.roles.push("admin");
 
     expect(immutable.getArray("subject", "roles")).toEqual(["reader"]);
@@ -39,8 +39,7 @@ describe("AttributeContext", () => {
     expect(Object.isFrozen(immutable.subject)).toBe(true);
     expect(Object.isFrozen(immutable.getArray("subject", "roles"))).toBe(true);
   });
-
-  it("supports typed lookups across all four attribute categories", () => {
+    it("supports typed lookups across all four attribute categories", () => {
     const context = AttributeContext.create({
       subject: { id: "user-1", role: "admin" },
       resource: { ownerId: "user-2", sensitivity: "high" },

@@ -266,7 +266,16 @@ export class VerifyAuditChain {
           organizationEntryCount += 1;
         }
         if (wantedSequences.has(entry.sequence)) {
-          hashesBySequence.set(entry.sequence, entry.hash);
+          // The *recomputed* hash, not the stored one.
+          //
+          // An anchor check asks whether the ledger and this database still
+          // agree about what the log said. Using entry.hash asks the row for
+          // its own opinion of itself, which a tampered row answers with the
+          // hash it was written with -- so a record whose content was edited
+          // while its hash column was left alone matched the ledger and was
+          // reported as agreeing. That is precisely the tampering anchoring
+          // exists to catch, and it was invisible.
+          hashesBySequence.set(entry.sequence, entry.recomputedHash);
         }
       }
 

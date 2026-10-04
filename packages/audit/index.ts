@@ -17,6 +17,22 @@ export type { ResourceType, OrganizationId } from "./domain/entities/audit-event
 export { type AuditAction as AuditActionType } from "./domain/value-objects/audit-action.js";
 export { isAuditAction } from "./domain/value-objects/audit-action.js";
 
+// Domain: AuditMetadata (Issue 196 — the bounds and per-sink encodings that
+// keep a crafted metadata value from speaking for the record)
+export {
+  AuditMetadata,
+  escapeForText,
+  escapeJsonLineTerminators,
+  MAX_METADATA_ENTRIES,
+  MAX_METADATA_KEY_LENGTH,
+  MAX_METADATA_VALUE_LENGTH,
+  METADATA_REJECTED_KEY,
+  neutralizeFormulaPrefix,
+  rejectionReasonOf,
+  utf8ByteLength,
+} from "./domain/value-objects/audit-metadata.js";
+export type { AuditMetadataRejectionReason } from "./domain/value-objects/audit-metadata.js";
+
 // Application: ports (AuditLogRepository - Phase 01)
 export type {
   AnchorFailure,
@@ -54,6 +70,28 @@ export {
   RecordAuditEvent,
   type RecordAuditEventCommand,
 } from "./application/use-cases/record-audit-event.js";
+export {
+  AUDIT_EXPORT_HEADER,
+  DEFAULT_EXPORT_MAX_RECORDS,
+  ExportAuditEvents,
+  type AuditExportFormat,
+  type AuditExportLogger,
+  type ExportAuditEventsCommand,
+  type ExportAuditEventsResult,
+} from "./application/use-cases/export-audit-events.js";
+export {
+  AgeRetentionPolicy,
+  DEFAULT_RETENTION_POLICY,
+  DEFAULT_RETENTION_WINDOW_DAYS,
+  type RetentionPolicy,
+  type RetentionWindow,
+} from "./application/ports/retention-policy.js";
+export {
+  ApplyAuditRetentionPolicy,
+  type ApplyRetentionPolicyCommand,
+  type RetentionCandidate,
+  type RetentionReview,
+} from "./application/use-cases/apply-audit-retention-policy.js";
 export {
   QueryAuditEvents,
   type QueryAuditEventsCommand,
@@ -99,3 +137,7 @@ export {
   InMemoryAnchorRecordRepository,
   InMemoryAuditLogRepository,
 } from "./infrastructure/testing/in-memory-audit-repositories.js";
+export {
+  IdentityCredentialsAuditSubscriber,
+  type AuditSubscriberErrorHandler,
+} from "./infrastructure/event-handlers/identity-credentials-audit-subscriber.js";

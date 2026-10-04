@@ -1,7 +1,13 @@
 // Curated public surface of @verixa/mfa. Only this entrypoint may be imported
 // from outside the package (see docs/guides/domain-modeling.md).
+//
+// Reconstructed after a merge left two versions of this file concatenated:
+// one using `export *` wildcards, one curated. The curated form is kept,
+// because a wildcard re-export makes the public surface whatever the files
+// happen to contain — which is how a package's internals become someone
+// else's dependency by accident.
 
-// Domain: entities and types
+// Domain: entities
 export {
   MfaMethod,
   type MfaMethodId,
@@ -11,33 +17,22 @@ export {
   type UserId,
 } from "./domain/entities/mfa-method.js";
 
-// Domain: value objects and services
+// Domain: value objects
 export { TotpSecret } from "./domain/value-objects/totp-secret.js";
-export { TotpAlgorithm } from "./domain/services/totp-algorithm.js";
-export * from "./domain/entities/mfa-method.js";
-export * from "./application/ports/mfa-method-repository.js";
-export * from "./infrastructure/persistence/prisma-mfa-method-repository.js";
-export * from "./domain/services/backup-code-set.js";
-export * from "./application/use-cases/generate-backup-codes.js";
-export * from "./application/ports/audit-logger.js";
-export * from "./application/use-cases/consume-backup-code.js";
-export { RecoverMfaAccess, type RecoverMfaAccessCommand, type RecoverMfaAccessResult, type RecoverMfaAccessError } from "./application/use-cases/recover-mfa-access.js";
-export type { SessionRevoker } from "./application/ports/session-revoker.js";
-export {
-  MfaEnforcementPolicy,
-  type MfaEnforcementLevel,
-  type MfaEnforcementConfig,
-  type MfaEnforcementContext,
-  type ResolvedMfaPolicy,
-} from "./domain/services/mfa-enforcement-policy.js";
 export { StepUpAssertion } from "./domain/value-objects/step-up-assertion.js";
+
+// Domain: services
 export type { TotpAlgorithm, TotpSecretLike } from "./domain/services/totp-algorithm.js";
 export { Rfc6238TotpAlgorithm } from "./domain/services/rfc-totp-algorithm.js";
-export { BackupCodeSet, type BackupCodeGenerationResult } from "./domain/services/backup-code-set.js";
+export {
+  BackupCodeSet,
+  type BackupCodeGenerationResult,
+} from "./domain/services/backup-code-set.js";
 export {
   MfaEnforcementPolicy,
   type MfaEnforcementDecision,
   type MfaEnforcementLevel,
+  type MfaEnforcementOverride,
   type MfaEnforcementPolicyInput,
 } from "./domain/services/mfa-enforcement-policy.js";
 
@@ -49,7 +44,11 @@ export type { SessionRevoker } from "./application/ports/session-revoker.js";
 export type { MfaRecoveryAuthorizer } from "./application/ports/mfa-recovery-authorizer.js";
 
 // Application: use cases
-export { EnrollTotp, type EnrollTotpCommand, type EnrollTotpResult } from "./application/use-cases/enroll-totp.js";
+export {
+  EnrollTotp,
+  type EnrollTotpCommand,
+  type EnrollTotpResult,
+} from "./application/use-cases/enroll-totp.js";
 export {
   ConfirmTotpEnrollment,
   type ConfirmTotpEnrollmentCommand,

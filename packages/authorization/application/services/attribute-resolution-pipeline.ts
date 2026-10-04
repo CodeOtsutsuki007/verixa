@@ -1,4 +1,8 @@
-import { AttributeContext, type AttributeBag, type AttributeBagName } from "../../domain/value-objects/attribute-context.js";
+import {
+  AttributeContext,
+  type AttributeBag,
+  type AttributeBagName,
+} from "../../domain/value-objects/attribute-context.js";
 import type { AttributeProvider, AttributeResolutionRequest } from "../ports/attribute-provider.js";
 
 export interface AttributeProviderFailure {
@@ -13,7 +17,10 @@ export interface AttributeResolutionResult {
 
 /** Required provider failure rejects resolution with its source identified. */
 export class AttributeProviderResolutionError extends Error {
-  constructor(readonly provider: string, options?: ErrorOptions) {
+  constructor(
+    readonly provider: string,
+    options?: ErrorOptions,
+  ) {
     super(`Required attribute provider "${provider}" failed.`, options);
     this.name = "AttributeProviderResolutionError";
   }
@@ -30,7 +37,8 @@ export class AttributeResolutionPipeline {
     const names = new Set<string>();
     for (const provider of providers) {
       if (!provider.name.trim()) throw new TypeError("Attribute providers need a non-empty name.");
-      if (names.has(provider.name)) throw new TypeError(`Duplicate attribute provider: ${provider.name}`);
+      if (names.has(provider.name))
+        throw new TypeError(`Duplicate attribute provider: ${provider.name}`);
       names.add(provider.name);
     }
   }
@@ -65,7 +73,7 @@ export class AttributeResolutionPipeline {
       };
     }
 
-    return { context: new AttributeContext(bags), failures: Object.freeze(failures) };
+    return { context: AttributeContext.create(bags), failures: Object.freeze(failures) };
   }
 }
 
@@ -74,7 +82,7 @@ function mergeRecords(earlier: AttributeBag, later: AttributeBag): AttributeBag 
   for (const [key, value] of Object.entries(later)) {
     const oldValue = merged[key];
     if (isRecord(oldValue) && isRecord(value)) {
-      merged[key] = mergeRecords(oldValue as AttributeBag, value as AttributeBag);
+      merged[key] = mergeRecords(oldValue as AttributeBag, value);
     } else {
       merged[key] = value;
     }
@@ -83,5 +91,7 @@ function mergeRecords(earlier: AttributeBag, later: AttributeBag): AttributeBag 
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
+  return (
+    typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date)
+  );
 }

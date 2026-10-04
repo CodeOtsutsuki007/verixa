@@ -163,10 +163,7 @@ Lines 260–276 return a single error shape for all six authentication failure
 modes:
 
 ```ts
-throw new AuthenticationError(
-  "AUTHENTICATION_FAILED",
-  "Invalid email or password.",
-);
+throw new AuthenticationError("AUTHENTICATION_FAILED", "Invalid email or password.");
 ```
 
 What are the six? Let's trace the use case:
@@ -227,8 +224,7 @@ The fix is to make both paths do exactly the same work. Lines 235–239
 implement it:
 
 ```ts
-const hasherWithoutCredential =
-  this.passwordHasher.hashAgainstDecoy(command.password);
+const hasherWithoutCredential = this.passwordHasher.hashAgainstDecoy(command.password);
 
 if (!credential) {
   // Can't verify against a real credential, so verify against a decoy
@@ -271,8 +267,8 @@ measure wall-clock time — that is fragile, depends on hardware, and fails
 under load. Instead it counts how many times `verify()` was called:
 
 ```ts
-expect(verifyCallCount).toBe(1);  // no account path
-expect(verifyCallCount).toBe(1);  // wrong password path — same
+expect(verifyCallCount).toBe(1); // no account path
+expect(verifyCallCount).toBe(1); // wrong password path — same
 ```
 
 Both paths call verify exactly once, proving they do identical work even if
@@ -422,10 +418,10 @@ If you checked status first, the flow would be:
 
 ```ts
 if (user.status === "suspended") {
-  throw new Error("This account is suspended.");  // Leaks existence!
+  throw new Error("This account is suspended."); // Leaks existence!
 }
 
-await verify(password);  // expensive, only if status is OK
+await verify(password); // expensive, only if status is OK
 ```
 
 Now "this account is suspended" answers the enumeration question: does this
@@ -552,7 +548,7 @@ if (this.used) {
   throw new UsedPasswordResetTokenError();
 }
 
-this.markAsUsed();  // Sets used: true
+this.markAsUsed(); // Sets used: true
 ```
 
 Why does this matter?
@@ -571,11 +567,11 @@ confirm-password-reset.spec.ts), so old emails automatically expire.
 
 ### Token lifecycle differences
 
-|                | Email Verification | Password Reset |
-| -------------- | ------------------- | -------------- |
-| Lifetime       | 24 hours            | 1 hour         |
-| What it grants | Activation          | Password change |
-| Error detail   | Reported            | Withheld       |
+|                | Email Verification | Password Reset  |
+| -------------- | ------------------ | --------------- |
+| Lifetime       | 24 hours           | 1 hour          |
+| What it grants | Activation         | Password change |
+| Error detail   | Reported           | Withheld        |
 
 The reset token is shorter-lived because reset is higher-risk. It is also
 more guarded about failure detail — see Stop 6 below.
@@ -839,4 +835,3 @@ Either exercise deepens your understanding of one critical piece: the
 properties that make login secure, the policies that make lockout effective
 without becoming a DoS, or the reasoning behind rejecting weak passwords before
 they are hashed. Pick one and do it.
-
