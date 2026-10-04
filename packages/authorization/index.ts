@@ -30,6 +30,37 @@ export type {
 
 // Application: ports (implemented by infrastructure adapters — see
 // docs/guides/domain-modeling.md)
+export type {
+  PolicyDecisionPoint,
+  PolicyEvaluation,
+} from "./application/ports/policy-decision-point.js";
+export type {
+  RoleCheckRequest,
+  RoleDecision,
+  RoleDecisionKind,
+  RolePermissionGate,
+} from "./application/ports/role-permission-gate.js";
+
+// Application: services
+export { AuthorizationService } from "./application/services/authorization-service.js";
+export type {
+  AuthorizationDecision,
+  AuthorizationDecisionSource,
+  AuthorizationEffect,
+  AuthorizationPrecedence,
+  PolicyEffect,
+} from "./domain/authorization-decision.js";
+export { emptyAttributeContext } from "./domain/attribute-context.js";
+export type {
+  AttributeBag,
+  AttributeContext,
+  AuthorizationRequest,
+  ResourceRef,
+  SubjectRef,
+} from "./domain/attribute-context.js";
+
+// Application: ports (implemented by infrastructure adapters — see
+// docs/guides/domain-modeling.md)
 export type { PermissionRepository } from "./application/ports/permission-repository.js";
 export type { RoleRepository } from "./application/ports/role-repository.js";
 export type {

@@ -29,6 +29,7 @@
     "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "ioredis": "^5.11.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
