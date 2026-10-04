@@ -1,6 +1,7 @@
 import { createId, type Id } from "@verixa/shared-kernel";
 
 import { type LockoutPolicy, lockDurationMs } from "../value-objects/lockout-policy.js";
+import { type PasswordHistoryPolicy } from "../value-objects/password-history-policy.js";
 
 export type CredentialId = Id<"CredentialId">;
 
@@ -22,11 +23,30 @@ interface CredentialProps {
   readonly failedAttempts: number;
   /** When the current lock expires, or `undefined` when not locked. */
   readonly lockedUntil: Date | undefined;
+  /**
+   * Ordered list of previous password hashes (most recent first).
+   * Current password is NOT in this list — it is in passwordHash.
+   * Capped at PasswordHistoryPolicy.depth entries.
+   *
+   * Optional on the way in and defaulted to empty, the same way `User`
+   * treats `domainEvents`. A credential reconstituted from a row written
+   * before history existed has no list, and that is not the same thing as a
+   * malformed record -- it simply predates the feature.
+   */
+  readonly passwordHistory?: string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
 
 const REDACTED = "[REDACTED]";
+
+/**
+ * Stored in place of a real hash once the owning user is deleted.
+ *
+ * Deliberately not a valid PHC string, so `verify` can never match it and no
+ * password can ever authenticate against the row.
+ */
+const DELETED_SENTINEL = "[DELETED]";
 
 /**
  * How a user proves who they are — deliberately a separate aggregate from
@@ -49,6 +69,7 @@ export class Credential {
   readonly passwordHash: string;
   readonly failedAttempts: number;
   readonly lockedUntil: Date | undefined;
+  readonly passwordHistory: string[];
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -58,6 +79,7 @@ export class Credential {
     this.passwordHash = props.passwordHash;
     this.failedAttempts = props.failedAttempts;
     this.lockedUntil = props.lockedUntil;
+    this.passwordHistory = props.passwordHistory ?? [];
     this.createdAt = props.createdAt;
     this.updatedAt = props.updatedAt;
   }
@@ -80,6 +102,7 @@ export class Credential {
       passwordHash: params.passwordHash,
       failedAttempts: 0,
       lockedUntil: undefined,
+      passwordHistory: [],
       createdAt: now,
       updatedAt: now,
     });
@@ -144,6 +167,29 @@ export class Credential {
    * that differs only in `updatedAt`, turning the hottest read path in the
    * system into a write on each request.
    */
+  /**
+   * Marks the credential permanently unusable after its user is deleted.
+   *
+   * Called by `HandleUserDeleted`. The hash is replaced with a sentinel
+   * rather than left in place: a deleted account cannot be logged into, so
+   * retaining a verifiable hash keeps an offline-grindable secret for an
+   * account nobody can use -- exactly the data erasure is meant to remove.
+   *
+   * The failure counter and lock are cleared at the same time. There is no
+   * way to recover from a lock on a deleted account, so carrying the state
+   * forward complicates observability without protecting anything.
+   */
+  invalidateForDeletedUser(now: Date = new Date()): Credential {
+    return new Credential({
+      ...this,
+      passwordHash: DELETED_SENTINEL,
+      failedAttempts: 0,
+      lockedUntil: undefined,
+      passwordHistory: [],
+      updatedAt: now,
+    });
+  }
+
   recordSuccessfulAttempt(now: Date = new Date()): Credential {
     if (this.failedAttempts === 0 && this.lockedUntil === undefined) {
       return this;
@@ -154,6 +200,57 @@ export class Credential {
       failedAttempts: 0,
       lockedUntil: undefined,
       updatedAt: now,
+    });
+  }
+
+  /**
+   * Checks whether a candidate plaintext password matches the current password
+   * or any entry in the password history.
+   *
+   * Uses async comparison (argon2) for each entry. Short-circuits on first match.
+   *
+   * @param candidatePassword - Plaintext password to check
+   * @param comparePassword - Injected comparison function (e.g., PasswordHasher.verify)
+   * @returns true if candidate matches current or any history entry
+   */
+  async isPasswordReused(
+    candidatePassword: string,
+    comparePassword: (plain: string, hash: string) => Promise<boolean>,
+  ): Promise<boolean> {
+    // Check current password first
+    const matchesCurrent = await comparePassword(candidatePassword, this.passwordHash);
+    if (matchesCurrent) return true;
+
+    // Check history entries (most recent first — short-circuit on match)
+    for (const historicHash of this.passwordHistory) {
+      const matches = await comparePassword(candidatePassword, historicHash);
+      if (matches) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Rotates the password: pushes current hash to history, sets new hash,
+   * and caps history at the policy depth.
+   *
+   * Called instead of directly mutating passwordHash to maintain history
+   * invariants.
+   *
+   * @param newPasswordHash - Already-hashed new password
+   * @param historyPolicy - Configuration for history depth
+   */
+  rotatePassword(newPasswordHash: string, historyPolicy: PasswordHistoryPolicy): Credential {
+    // Push current to front of history (most recent first)
+    const newHistory = [this.passwordHash, ...this.passwordHistory].slice(0, historyPolicy.depth);
+
+    return new Credential({
+      ...this,
+      passwordHash: newPasswordHash,
+      passwordHistory: newHistory,
+      failedAttempts: 0,
+      lockedUntil: undefined,
+      updatedAt: new Date(),
     });
   }
 

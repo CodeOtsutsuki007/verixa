@@ -1,5 +1,5 @@
 import { Email, type User } from "@verixa/identity";
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { Argon2PasswordHasher } from "../../infrastructure/argon2-password-hasher.js";
@@ -29,8 +29,8 @@ describe("AuthenticateWithPassword", () => {
     // instance. Sharing one would let the first test warm the cache for the
     // rest and quietly disarm the timing test below.
     hasher = new Argon2PasswordHasher(FAST);
-    register = new RegisterUserWithPassword(unitOfWork, hasher);
-    authenticate = new AuthenticateWithPassword(unitOfWork, hasher);
+    register = new RegisterUserWithPassword(unitOfWork, hasher, new NoopRateLimiter());
+    authenticate = new AuthenticateWithPassword(unitOfWork, hasher, new NoopRateLimiter());
 
     const registered = await register.execute({
       email: EMAIL,
@@ -178,7 +178,7 @@ describe("AuthenticateWithPassword", () => {
         },
         needsRehash: (encodedHash) => hasher.needsRehash(encodedHash),
       };
-      const useCase = new AuthenticateWithPassword(unitOfWork, counting);
+      const useCase = new AuthenticateWithPassword(unitOfWork, counting, new NoopRateLimiter());
 
       await useCase.execute({ email: EMAIL, password: "wrong password entirely" });
       const afterWrongPassword = verifications;
@@ -197,7 +197,7 @@ describe("AuthenticateWithPassword", () => {
       // hasher configured with different ones — which looks like it works,
       // costs the wrong amount, and leaves the side channel open.
       const expensive = new Argon2PasswordHasher({ ...FAST, timeCost: 3 });
-      const useCase = new AuthenticateWithPassword(unitOfWork, expensive);
+      const useCase = new AuthenticateWithPassword(unitOfWork, expensive, new NoopRateLimiter());
 
       const result = await useCase.execute({ email: "nobody@example.com", password: PASSWORD });
 
@@ -211,7 +211,7 @@ describe("AuthenticateWithPassword", () => {
       // is the only time the plaintext exists. Without this, raising cost
       // parameters would mean a mass password reset.
       const stronger = new Argon2PasswordHasher({ ...FAST, memoryCost: 512 });
-      const useCase = new AuthenticateWithPassword(unitOfWork, stronger);
+      const useCase = new AuthenticateWithPassword(unitOfWork, stronger, new NoopRateLimiter());
 
       const existing = await loadUser(unitOfWork);
       const before = await unitOfWork.repositories.credentials.findByUserId(existing.id);
@@ -249,9 +249,14 @@ describe("AuthenticateWithPassword", () => {
           findByUserId: (userId) => unitOfWork.repositories.credentials.findByUserId(userId),
           save: () => Promise.reject(new Error("database is on fire")),
           deleteByUserId: (userId) => unitOfWork.repositories.credentials.deleteByUserId(userId),
+          // Delegated rather than stubbed: this fake exists to make `save`
+          // fail, and every other method should behave normally so the test
+          // isolates that one failure.
+          getStaleCredentialMetrics: (hasher) =>
+            unitOfWork.repositories.credentials.getStaleCredentialMetrics(hasher),
         },
       });
-      const useCase = new AuthenticateWithPassword(failing, stronger);
+      const useCase = new AuthenticateWithPassword(failing, stronger, new NoopRateLimiter());
 
       const result = await useCase.execute({ email: EMAIL, password: PASSWORD });
 

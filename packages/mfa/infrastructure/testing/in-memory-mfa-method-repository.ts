@@ -14,14 +14,18 @@ export class InMemoryMfaMethodRepository implements MfaMethodRepository {
 
   async findActiveByUserId(userId: UserId): Promise<MfaMethod[]> {
     return Array.from(this.methods.values()).filter(
-      (m) => m.userId === userId && m.status === "active"
+      (m) => m.userId === userId && m.status === "active",
     );
   }
 
   async findPendingByUserId(userId: UserId): Promise<MfaMethod[]> {
     return Array.from(this.methods.values()).filter(
-      (m) => m.userId === userId && m.status === "pending"
+      (m) => m.userId === userId && m.status === "pending",
     );
+  }
+
+  async findAllByUserId(userId: UserId): Promise<MfaMethod[]> {
+    return Array.from(this.methods.values()).filter((m) => m.userId === userId);
   }
 
   async delete(id: MfaMethodId): Promise<void> {

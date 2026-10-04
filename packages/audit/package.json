@@ -12,10 +12,13 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
+    "verify-chain": "tsx infrastructure/cli/verify-chain.ts",
     "demo": "pnpm --filter @verixa/audit^... run build && tsx scripts/anchor-demo.ts"
   },
   "dependencies": {
-    "@verixa/shared-kernel": "workspace:*"
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@stellar/stellar-sdk": "^16.2.0",

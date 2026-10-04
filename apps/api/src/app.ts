@@ -3,6 +3,7 @@ import Fastify from "fastify";
 
 import type { Container } from "./composition-root.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerVerificationRoutes } from "./routes/verification.js";
 
 export interface BuildAppOptions {
   readonly logger?: Logger;
@@ -64,6 +65,9 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.container !== undefined) {
     registerAuthRoutes(app, options.container);
+    // Takes only the Fastify instance: this route group resolves what it
+    // needs from the request rather than from the container.
+    registerVerificationRoutes(app);
   }
 
   return app;

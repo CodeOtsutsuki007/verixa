@@ -2,7 +2,25 @@ import { createHash } from "node:crypto";
 
 import { createId, type Id } from "@verixa/shared-kernel";
 
+import {
+  AuditMetadata,
+  escapeForText,
+  escapeJsonLineTerminators,
+  utf8ByteLength,
+} from "../value-objects/audit-metadata.js";
+
 export type AuditLogEntryId = Id<"AuditLogEntryId">;
+
+/**
+ * The label prefixed to every canonical form.
+ *
+ * Changing how an entry is serialized changes its digest, and a chain written
+ * under one rule and verified under another reports `content_altered` on every
+ * entry after the change — an integrity alarm with no tampering behind it.
+ * Naming the form in the form means that if this ever has to change again, the
+ * version that produced a given hash travels with the hash.
+ */
+const CANONICAL_FORM_VERSION = "verixa-audit-v2";
 
 /**
  * What happened. A closed set rather than a free string, so a query for
@@ -11,10 +29,14 @@ export type AuditLogEntryId = Id<"AuditLogEntryId">;
  */
 export type AuditAction =
   | "user.registered"
+  | "user.email_verified"
+  | "user.password_changed"
+  | "user.status_changed"
+  | "user.profile_updated"
+  | "organization.invitation_created"
   | "user.login_succeeded"
   | "user.login_failed"
   | "user.locked_out"
-  | "user.email_verified"
   | "user.password_reset_requested"
   | "user.password_reset_completed";
 
@@ -103,31 +125,41 @@ export class AuditLogEntry {
   /**
    * The canonical byte representation an entry's hash is computed over.
    *
-   * Field order is fixed and metadata keys are sorted, because the hash has
-   * to be reproducible by someone re-deriving it years later from the stored
-   * columns — possibly in another language. `JSON.stringify` over an object
-   * would make the digest depend on JavaScript's property-insertion order,
-   * which is an implementation detail of how the entry happened to be built.
+   * Field order is fixed, metadata keys are sorted, and **every field carries
+   * its own byte length**. That last part is the one to read carefully.
    *
-   * Newline-separated with an explicit field count rather than concatenated,
-   * so no combination of field values can produce the same string as a
-   * different combination.
+   * This used to join the fields with newlines, on the reasoning that an
+   * explicit separator makes concatenation unambiguous. It does not, when the
+   * separator can appear *inside* a field: `actorId` and `subjectId` are
+   * routinely supplied from outside the process, and an entry with actor
+   * `"a\nb"` and subject `"c"` serialized identically to a different entry with
+   * actor `"a"` and subject `"b\nc"`. Two different facts, one digest — which
+   * inverts the property the chain exists to provide. The same bug class
+   * reappears wherever a value is embedded in a syntax by concatenation, so it
+   * is treated as a threat in its own right in
+   * `docs/security/threat-model-audit.md`.
+   *
+   * A length prefix declares how many bytes belong to the field, so nothing
+   * inside it can be read as framing. The form is versioned and mechanical
+   * rather than pretty, because the digest has to be re-derivable years later
+   * from the stored columns by somebody not running this code — hence UTF-8
+   * *byte* lengths rather than JavaScript character counts, which disagree
+   * about anything outside ASCII.
    */
   private static canonicalize(props: Omit<AuditLogEntryProps, "hash" | "id">): string {
-    const metadata = Object.keys(props.metadata)
-      .sort()
-      .map((key) => `${key}=${props.metadata[key] ?? ""}`)
-      .join("");
-
-    return [
+    const fields = [
       String(props.sequence),
       props.action,
       props.actorId ?? "",
       props.subjectId ?? "",
       props.occurredAt.toISOString(),
       props.previousHash,
-      metadata,
-    ].join("\n");
+      AuditMetadata.of(props.metadata).canonicalForm,
+    ];
+
+    const framed = fields.map((field) => `${String(utf8ByteLength(field))}:${field}`).join("|");
+
+    return `${CANONICAL_FORM_VERSION} ${String(fields.length)} ${framed}`;
   }
 
   /** SHA-256 over {@link canonicalize}, hex-encoded. */
@@ -181,19 +213,62 @@ export class AuditLogEntry {
    * row would edit the hash too. The check only means something when the
    * digest is derived again from the content.
    */
+  /**
+   * The hash this entry's *content* produces, recomputed from scratch.
+   *
+   * Distinct from {@link hash}, which is whatever the row happens to store.
+   * The two agree only while the record is intact, so anything comparing an
+   * entry against an external commitment must use this one -- comparing the
+   * stored hash to a ledger means comparing a tampered row's own claim about
+   * itself, which always agrees.
+   */
+  get recomputedHash(): string {
+    return AuditLogEntry.computeHash({
+      sequence: this.sequence,
+      action: this.action,
+      actorId: this.actorId,
+      subjectId: this.subjectId,
+      metadata: this.metadata,
+      occurredAt: this.occurredAt,
+      previousHash: this.previousHash,
+    });
+  }
+
   get hasValidHash(): boolean {
-    return (
-      this.hash ===
-      AuditLogEntry.computeHash({
-        sequence: this.sequence,
-        action: this.action,
-        actorId: this.actorId,
-        subjectId: this.subjectId,
-        metadata: this.metadata,
-        occurredAt: this.occurredAt,
-        previousHash: this.previousHash,
-      })
-    );
+    return this.hash === this.recomputedHash;
+  }
+
+  /**
+   * A one-record-per-entry projection of this entry, safe to write into any
+   * line-oriented sink.
+   *
+   * No field can contain a character a reader would take for a line break, so
+   * the number of lines in the output equals the number of entries — the
+   * property an auditor counting rows is silently relying on, and the reason
+   * this projection, rather than the raw values, is what `ExportAuditEvents`
+   * builds its CSV rows from.
+   *
+   * Note what this does *not* do: it does not change what is stored or hashed.
+   * The escaping is a property of this rendering, not of the data, so the same
+   * entry can be logged, exported as CSV, and exported as JSON without any of
+   * the three agreeing on how to write a newline — and without any of them
+   * rewriting the record.
+   */
+  toLogFields(): Readonly<Record<string, string>> {
+    // `sequence`, `occurredAt`, and the two hashes are structurally safe — a
+    // number, an ISO timestamp, and hex. Everything that came from outside the
+    // process is escaped, and the metadata bag goes through the JSON-specific
+    // treatment instead of `escapeForText` (see `escapeJsonLineTerminators`).
+    return {
+      sequence: String(this.sequence),
+      action: escapeForText(this.action),
+      actorId: escapeForText(this.actorId ?? ""),
+      subjectId: escapeForText(this.subjectId ?? ""),
+      occurredAt: this.occurredAt.toISOString(),
+      previousHash: this.previousHash,
+      hash: this.hash,
+      metadata: escapeJsonLineTerminators(JSON.stringify(this.metadata) ?? "{}"),
+    };
   }
 }
 
@@ -201,6 +276,43 @@ export class AuditLogEntry {
 export interface ChainBreak {
   readonly sequence: number;
   readonly reason: "content_altered" | "link_broken" | "sequence_gap";
+}
+
+/**
+ * Verifies a contiguous run of entries, seeded with the entry that precedes
+ * the run.
+ *
+ * The seed is what makes verification work on a *window* of a log rather than
+ * only from its genesis: a caller that pages through a million-entry log never
+ * holds the whole chain in memory, but each page still has to know what its
+ * first entry was supposed to link to. Pass `undefined` for the run that starts
+ * the chain.
+ */
+export function verifyChainFrom(
+  previous: AuditLogEntry | undefined,
+  entries: readonly AuditLogEntry[],
+): ChainBreak | undefined {
+  let predecessor = previous;
+
+  for (const entry of entries) {
+    if (!entry.hasValidHash) {
+      return { sequence: entry.sequence, reason: "content_altered" };
+    }
+
+    const expectedPreviousHash = predecessor?.hash ?? GENESIS_HASH;
+    if (entry.previousHash !== expectedPreviousHash) {
+      return { sequence: entry.sequence, reason: "link_broken" };
+    }
+
+    const expectedSequence = predecessor === undefined ? 1 : predecessor.sequence + 1;
+    if (entry.sequence !== expectedSequence) {
+      return { sequence: entry.sequence, reason: "sequence_gap" };
+    }
+
+    predecessor = entry;
+  }
+
+  return undefined;
 }
 
 /**
@@ -219,25 +331,5 @@ export interface ChainBreak {
  *   up the hashes but not the counter.
  */
 export function verifyChain(entries: readonly AuditLogEntry[]): ChainBreak | undefined {
-  let previous: AuditLogEntry | undefined;
-
-  for (const entry of entries) {
-    if (!entry.hasValidHash) {
-      return { sequence: entry.sequence, reason: "content_altered" };
-    }
-
-    const expectedPreviousHash = previous?.hash ?? GENESIS_HASH;
-    if (entry.previousHash !== expectedPreviousHash) {
-      return { sequence: entry.sequence, reason: "link_broken" };
-    }
-
-    const expectedSequence = previous === undefined ? 1 : previous.sequence + 1;
-    if (entry.sequence !== expectedSequence) {
-      return { sequence: entry.sequence, reason: "sequence_gap" };
-    }
-
-    previous = entry;
-  }
-
-  return undefined;
+  return verifyChainFrom(undefined, entries);
 }
