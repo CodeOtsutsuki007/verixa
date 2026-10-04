@@ -5,6 +5,11 @@ export type {
   UserRoleAssignmentRepository,
 } from "./application/ports/user-role-assignment-repository.js";
 export {
+  AssignPermissionToRole,
+  type AssignPermissionToRoleCommand,
+  type AssignPermissionToRoleError,
+} from "./application/use-cases/assign-permission-to-role.js";
+export {
   CreateRole,
   type CreateRoleCommand,
   type CreateRoleError,
@@ -14,6 +19,11 @@ export {
   type DefinePermissionCommand,
   type DefinePermissionError,
 } from "./application/use-cases/define-permission.js";
+export {
+  RevokePermissionFromRole,
+  type RevokePermissionFromRoleCommand,
+  type RevokePermissionFromRoleError,
+} from "./application/use-cases/revoke-permission-from-role.js";
 export {
   Role,
   type CreateRoleParams,
