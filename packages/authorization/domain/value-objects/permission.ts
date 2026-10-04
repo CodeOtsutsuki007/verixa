@@ -1,11 +1,11 @@
 import { Result, ValidationError } from "@verixa/shared-kernel";
 
-const PERMISSION_PATTERN = /^[a-z0-9_-]+:[a-z0-9_*-]+$/u;
+const PERMISSION_PATTERN = /^[a-z0-9_*-]+:[a-z0-9_*-]+$/u;
 
 /**
  * An immutable domain value object representing a permission formatted as `resource:action`.
  *
- * Examples: `users:read`, `roles:write`, `audit:export`, `orgs:*`.
+ * Examples: `users:read`, `roles:write`, `audit:export`, `orgs:*`, `*:*`.
  *
  * Uses structural value equality (two Permission instances with the same normalized
  * string value are considered equal).
@@ -113,13 +113,20 @@ export class Permission {
 
   /**
    * Returns true if this permission matches a required permission, taking into
-   * account action wildcards (e.g. `users:*` matches `users:read`).
+   * account action wildcards (e.g. `users:*` matches `users:read`) and global
+   * wildcards (`*:*` matches any permission).
    */
   matches(required: Permission): boolean {
     if (this.value === required.value) {
       return true;
     }
+    if (this.resource === "*" && this.action === "*") {
+      return true;
+    }
     if (this.resource === required.resource && this.action === "*") {
+      return true;
+    }
+    if (this.resource === "*" && this.action === required.action) {
       return true;
     }
     return false;

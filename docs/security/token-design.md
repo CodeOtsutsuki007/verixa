@@ -381,6 +381,8 @@ For how bearer secrets are _stored_ (hash-only, never plaintext), see
 [token-storage.md](./token-storage.md). For the login flows that mint these
 tokens, see [authentication-flows.md](./authentication-flows.md).
 
+For how multi-factor authentication gates session issuance via short-lived, single-use `MfaChallenge` tokens, see [mfa-design.md](./mfa-design.md).
+
 ## Two token types, on purpose
 
 A session is backed by two tokens with deliberately opposite designs:

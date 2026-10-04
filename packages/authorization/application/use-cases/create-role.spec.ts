@@ -93,6 +93,34 @@ describe("CreateRole", () => {
     }
   });
 
+  it("rejects creating a non-system role with the global wildcard *:*", async () => {
+    const result = await createRole.execute({
+      name: "super-user",
+      permissions: ["*:*"],
+      isSystemRole: false,
+    });
+
+    expect(Result.isErr(result)).toBe(true);
+    if (Result.isErr(result)) {
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.message).toContain("Global wildcard");
+    }
+  });
+
+  it("allows creating a system role with the global wildcard *:*", async () => {
+    const result = await createRole.execute({
+      name: "super-admin",
+      permissions: ["*:*"],
+      isSystemRole: true,
+    });
+
+    expect(Result.isOk(result)).toBe(true);
+    if (Result.isOk(result)) {
+      expect(result.value.isSystemRole).toBe(true);
+      expect(result.value.hasPermission("*:*")).toBe(true);
+    }
+  });
+
   it("rejects invalid role parameters without writing to repository", async () => {
     const result = await createRole.execute({ name: "" });
 

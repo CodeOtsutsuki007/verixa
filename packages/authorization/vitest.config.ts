@@ -8,6 +8,10 @@ export default mergeConfig(
     test: {
       name: "@verixa/authorization",
       coverage: {
+        // Ports are interface-only files: a TypeScript `interface` is erased at
+        // compile time, so there is no executable statement a test could cover.
+        // Counting them would report a meaningless 0% for a file with zero
+        // total statements, the same reasoning @verixa/identity documents.
         exclude: ["**/application/ports/**", "index.ts"],
         thresholds: {
           statements: 90,

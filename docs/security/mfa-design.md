@@ -169,6 +169,15 @@ The `TotpAlgorithm` domain service is explicitly tested against the standard tes
 Network latency, clock drift on the user's device, and the time it takes a user to type a code can cause a TOTP code to arrive just after its 30-second window expires.
 
 To handle this gracefully, the verification algorithm accepts codes within a small sliding window (`Â±1` step, i.e., 30 seconds before or after the current server time). This provides a 90-second overall acceptance window, minimizing false rejections without significantly degrading security.
+## Pending-MFA Challenge & Session-Issuance Gate
+
+When a password verification succeeds but the resolved enforcement policy (Issue 114) requires a second factor, Verixa issues an `MfaChallenge` entity rather than a full `Session`.
+
+**Why we separate password verification from session issuance via an intermediate challenge:**
+In tutorial-grade authentication flows, passing the password check directly grants a full session, after which MFA checks are bolted on as a subsequent route guard or middleware. If a bug or misconfiguration bypasses the MFA middleware, an attacker who guesses a password gains full API access immediately. By introducing a short-lived (5-minute), single-use `MfaChallenge` token, a password-verified user holds an entity that cannot authorize any API access whatsoever. A full session is issued by `IssueSession` (Issue 087) only after a method-specific verification use case successfully consumes the challenge.
+
+*Alternative considered:* Store a "password_verified" flag directly on a preliminary session or return a custom temporary bearer token that doubles as a session.
+*Reason rejected:* A preliminary session with reduced privileges increases the attack surface and risks state-machine confusion where a bug treats a pending session as active. A dedicated `MfaChallenge` aggregate with strict single-use semantics and explicit expiry guarantees complete isolation between authentication steps.
 
 ## TOTP Enrollment
 
@@ -251,6 +260,23 @@ When a user requests a new set of backup codes, the new set completely replaces 
 **Why?**
 We deliberately rejected the alternative of "appending" new codes to an ever-growing pool of valid backup codes. While an additive pool might seem more forgiving if a user finds an old printout, it is insecure: it means a compromised set of codes remains permanently valid unless explicitly revoked by the user, and an attacker who gains temporary access could generate a second set for themselves without alerting the user by breaking the first set. Full-set replacement guarantees that the user always has exactly one authoritative, finite set of codes at any time, and that generating a new set acts as an implicit revocation of any previously compromised or lost sets.
 
+### WebAuthn Credential Entity and Repository Design
+
+The `WebAuthnCredential` domain entity models the FIDO2/WebAuthn public key credential registered by a user's authenticator (e.g., TouchID, YubiKey, Windows Hello). 
+
+#### Security Properties & Design Decisions
+
+1. **Public Key Only Storage:**
+   - The entity stores *only* the authenticator's public key (`publicKey`) and credential identifier (`credentialId`), alongside the signature counter (`signCounter`), transports, and attestation type.
+   - **Rejected Alternative:** Storing authenticator private keys or session tokens in plaintext. Private keys never leave the hardware authenticator security enclave. Storing only public keys ensures that even a catastrophic database breach yields no usable material to impersonate users or forge authentication assertions.
+
+2. **Sign Counter & Clone Detection:**
+   - Authenticator hardware maintains an incrementing `signCounter` for each issued assertion. Every successful verification updates this counter.
+   - **Rejected Alternative:** Ignoring signature counters or relying solely on challenge randomness. Tracking `signCounter` enables clone detection (Issue 113): if a server receives an assertion where the counter is less than or equal to a previously recorded counter for the same credential, it indicates that an authenticator clone has been manufactured or compromised, allowing Verixa to immediately revoke or flag the credential.
+
+3. **Persistence and Ports & Adapters Architecture:**
+   - Domain rules remain entirely decoupled from infrastructure via the `WebAuthnCredentialRepository` port.
+   - `PrismaWebAuthnCredentialRepository` implements the persistence adapter utilizing PostgreSQL arrays for transports and cascading relations to the `MfaMethod` aggregate root.
 ## Admin-Assisted MFA Recovery
 
 When a user loses all enrolled MFA methods and exhausts backup codes, an administrator can restore access via the `RecoverMfaAccess` use case.

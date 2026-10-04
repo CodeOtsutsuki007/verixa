@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:load": "vitest run --config vitest.load.config.ts",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint ."
   },
