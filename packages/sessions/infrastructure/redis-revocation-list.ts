@@ -91,4 +91,3 @@ export class RedisRevocationList implements RevocationList {
     return `${this.keyPrefix}${sessionId}`;
   }
 }
-﻿export class RedisRevocationList {}

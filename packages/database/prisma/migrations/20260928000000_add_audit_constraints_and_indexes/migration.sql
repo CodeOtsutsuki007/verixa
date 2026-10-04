@@ -1,0 +1,33 @@
+-- Add subject_id index for audit log queries (Issue 183, 187)
+CREATE INDEX "audit_log_entries_subject_id_idx" ON "audit_log_entries" ("subject_id");
+
+-- Database-level append-only enforcement (Issue 183)
+-- 
+-- REVOKE UPDATE and DELETE on audit_log_entries for the application role.
+-- This is defense in depth: the repository port deliberately has no update or
+-- delete methods, but SQL can bypass that. Removing the privileges at the
+-- database level means even a hand-crafted UPDATE or a SQL injection cannot
+-- alter history.
+--
+-- Assumes the application connects as a role OTHER than the superuser who owns
+-- the table. The exact role name depends on your deployment configuration.
+-- Common patterns:
+--   - Heroku Postgres: the app user is the database owner, so this step is skipped
+--   - RDS/CloudSQL: the app user is typically NOT the owner, so this applies
+--   - Local dev: depends on how DATABASE_URL is configured
+--
+-- If your app connects as the table owner, these REVOKEs have no effect (owners
+-- cannot revoke their own privileges). In that case, this migration serves as
+-- documentation of the intended invariant, enforced instead by code review and
+-- the absence of update/delete methods in the repository port.
+--
+-- Replace 'your_app_role' with the actual role name used by your application.
+-- You can discover it by running: SELECT current_user;
+-- 
+-- For now, we'll use a placeholder comment. Uncomment and adjust for production:
+-- 
+-- REVOKE UPDATE ON TABLE "audit_log_entries" FROM your_app_role;
+-- REVOKE DELETE ON TABLE "audit_log_entries" FROM your_app_role;
+--
+-- The application user still needs INSERT and SELECT:
+-- GRANT INSERT, SELECT ON TABLE "audit_log_entries" TO your_app_role;

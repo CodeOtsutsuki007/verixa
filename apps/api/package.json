@@ -27,13 +27,16 @@
   },
   "dependencies": {
     "@verixa/audit": "workspace:*",
+    "@verixa/authorization": "workspace:*",
     "@verixa/config": "workspace:*",
     "@verixa/credentials": "workspace:*",
     "@verixa/database": "workspace:*",
     "@verixa/identity": "workspace:*",
+    "@verixa/mfa": "workspace:*",
     "@verixa/shared-kernel": "workspace:*",
     "@verixa/stellar-anchor": "workspace:*",
-    "fastify": "^5.12.1"
+    "fastify": "^5.12.1",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
