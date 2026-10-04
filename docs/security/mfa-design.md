@@ -130,6 +130,7 @@ FIDO2 authenticators maintain an internal monotonic counter (`signCount`) that i
   1. Immediately emits a `WebAuthnCloneSuspected` domain event (`mfa.webauthn.clone_suspected`).
   2. Records an authentication failure attempt on the associated `MfaMethod` (triggering automatic lockout if repeated).
   3. Rejects the assertion ceremony with a validation error.
+
 # Multi-Factor Authentication (MFA) Design
 
 Verixa implements a flexible, policy-driven multi-factor authentication system. This document outlines the design decisions and security properties of the supported MFA methods.

@@ -4,3 +4,15 @@ node_modules
 pnpm-lock.yaml
 pnpm-workspace.yaml
 planning
+
+# Quarantined: these files do not parse. Merges resolved as "keep both sides"
+# left two complete class declarations, duplicate imports and unbalanced braces
+# in them, so Prettier cannot build a syntax tree and `format:check` fails on
+# the whole repository rather than reporting a formatting difference.
+#
+# `packages/sessions` and `packages/verification` are *not* listed: they are
+# type-broken but syntactically valid, so Prettier still parses them and they
+# stay checked. Only add a path here when it genuinely will not parse.
+#
+# See docs/QUARANTINE.md. Remove this entry when the package is reconciled.
+packages/mfa
