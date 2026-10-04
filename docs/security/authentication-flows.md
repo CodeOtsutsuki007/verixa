@@ -188,6 +188,37 @@ The failure counter also keeps climbing _during_ a lock rather than freezing at
 the threshold. That is what makes the backoff exponential — each further
 attempt earns a longer next lock.
 
+## Rate Limiting
+
+All abuse-sensitive endpoints consult the `RateLimiter` port before executing:
+
+| Flow                        | Action Key           | Identifier    |
+| --------------------------- | -------------------- | ------------- |
+| Login                       | `login`              | email address |
+| Register                    | `register`           | email address |
+| Password Reset Request      | `password-reset`     | email address |
+| Password Reset Confirmation | `password-reset`     | reset token   |
+| Email Verification          | `email-verification` | email address |
+
+### Current Implementation
+
+A no-op adapter is wired until Phase 15 implements the real rate limiter.
+The no-op always allows requests — no actual limiting occurs yet.
+
+### Failure Behavior
+
+When the rate limit is exceeded, the use case throws an error containing
+`resetAt` (when the limit resets) and `limit` (the maximum allowed).
+The transport layer (HTTP controller) maps this to 429 Too Many Requests.
+
+### Adding Real Implementation (Phase 15)
+
+Implement the `RateLimiter` port and inject via DI container.
+No changes to use cases required — the seam is already wired.
+
+Follow existing patterns in this repo for ports, adapters,
+use cases, dependency injection, and testing.
+
 ## Transparent rehashing
 
 A successful login is the only moment the plaintext password exists in memory,
@@ -298,10 +329,17 @@ The danger is not that the reset is insecure — it is that it is _believed to
 have worked_. A user who knows they are still compromised takes further action;
 one who thinks they are safe does not.
 
-Sessions are Phase 05, so `SessionRevoker` has no real implementation yet.
-`NoSessionsRevoker` is genuinely correct today — there are no sessions to
-revoke — and the call site exists now so that "remember to revoke sessions"
-never has to be remembered.
+`@verixa/sessions` now has a real `LogoutEverywhere` use case (see
+"Sessions" below), but `apps/api/src/composition-root.ts` still wires
+`NoSessionsRevoker` rather than an adapter over it. That is not an oversight:
+`SessionRevoker` is defined here, in `@verixa/credentials`, and adapting it to
+`LogoutEverywhere` needs a real `SessionRepository`/`RevocationList` pair —
+Prisma- and Redis-backed, respectively — which do not exist yet. Wiring the
+adapter without them would compile but silently do nothing at runtime, which
+is worse than the explicit, honest no-op `NoSessionsRevoker` already is.
+`NoSessionsRevoker` remains correct until that infrastructure lands, and the
+call site exists now so that "remember to revoke sessions" never has to be
+remembered.
 
 When revocation fails, the error says so rather than reporting success: the
 password _did_ change, and the user needs to know their old sessions survived.
@@ -321,18 +359,198 @@ Phase 14. It is silent rather than logging "would have sent: &lt;token&gt;",
 because that version is the one that survives in production for a fortnight
 while every reset token in the system lands in a log aggregator.
 
+## Change Password (Credential Rotation)
+
+An authenticated user can change their own password by providing their current
+password for re-authentication. Distinct from password reset (Issue 070), which
+addresses account compromise.
+
+### Flow
+
+1. User (authenticated) submits current password + new password
+2. System re-authenticates with current password (step-up auth)
+3. If valid: hashes new password, updates credential, emits `PasswordChanged` event
+4. If invalid: returns generic error (`ValidationError` with no field details)
+
+### Step-Up Authentication Pattern
+
+This use case previews Phase 06 MFA step-up authentication: re-verifying
+identity before sensitive actions. Here, the `currentPassword` field is the
+step-up credential. The pattern is: "prove you are who you say you are _right
+now_, before we let you change something important."
+
+### Differences from Password Reset
+
+| Aspect         | Change Password   | Password Reset             |
+| -------------- | ----------------- | -------------------------- |
+| User state     | Authenticated     | Compromised (or forgot)    |
+| Credential     | Current password  | Email verification link    |
+| Friction       | Low (no email)    | Higher (token flow)        |
+| Lockout impact | Clears on success | Clears on success          |
+| Session impact | Stays active      | Revoked (security measure) |
+
+Change password is the owner deciding to rotate their credential voluntarily.
+Reset is an emergency that assumes the credential is compromised, so sessions
+must be invalidated.
+
+### Domain Event
+
+`PasswordChanged` — emitted after successful credential rotation.
+
+Consumed by: audit log (Phase 10), future session invalidation triggers
+(Phase 15+), MFA re-verification requirements (Phase 06+).
+
+### Error Handling
+
+Both of these return the same `ValidationError`:
+
+- Wrong current password
+- User not found (should be unreachable; authenticated requests have valid userId)
+
+The identical error prevents enumeration: a caller cannot tell whether the user
+exists or the password is wrong.
+
+**New password policy violations** also return `ValidationError`, but before any
+database work:
+
+- Too short (policy minimum)
+- Empty
+- Other policy-defined rejections
+
+### Security Properties
+
+**Current password must be provided.** Re-authentication is required. Unlike
+password reset (which proves email ownership), this proves knowledge of the
+current credential.
+
+**New password hash is independent.** A fresh salt is generated, so the new
+hash is different from the old even if the plaintext is unchanged (which is bad
+practice, but not cryptographically broken).
+
+**Plaintext passwords never stored or logged.** The plaintext exists only in
+memory during verification and hashing, and is never serialized.
+
+**Error messages are deliberately generic.** The difference between "current
+password is wrong" and "user not found" is not exposed.
+
+**Lockout is cleared on success.** A user who successfully changes their
+password has proved control of the account. Any lockout from repeated failed
+login attempts is cleared. They cannot be locked out of a credential they just
+set.
+
+### Implementation
+
+Implementation: `packages/credentials/application/use-cases/change-password.ts`
+
+Tests: `packages/credentials/application/use-cases/change-password.spec.ts`
+
+See `docs/guides/domain-modeling.md` for the structure: uses a `Result<T, E>`
+discriminated union, `CredentialsUnitOfWork` for transactions, ports for
+`PasswordHasher` and credential persistence.
+
 ## What login does not yet do
 
 `POST /auth/login` returns the authenticated user and **no session or token**.
-Sessions are Phase 05.
+Wiring session issuance into the login route is still open work — see
+"Sessions" below for what the package underneath it now does.
 
-Until then the endpoint is deliberately not enough to stay logged in with.
-Returning a placeholder token would be worse than returning none: clients would
-store it, and replacing it with a real one later would be a breaking change to
-a field that never worked.
+Until the route is wired up, it is deliberately not enough to stay logged in
+with. Returning a placeholder token would be worse than returning none:
+clients would store it, and replacing it with a real one later would be a
+breaking change to a field that never worked.
+
+## Sessions
+
+Implementation: `packages/sessions/`. Nothing in `apps/api` calls into this
+package yet — `POST /auth/login` does not issue a session, so everything
+below is exercised by the package's own tests, not by an HTTP request. It is
+documented here anyway, in the same file as login, because a session's
+lifecycle is inseparable from the login flow that will eventually create one.
+
+### Metadata is a history, not a snapshot
+
+`Session` records the device/IP/user-agent seen at issuance, and appends a
+new observation on `RefreshAccessToken` only when what the client presents
+has changed since the last one. It is a history rather than an overwritten
+field for exactly the reason `AuditLogEntry` chains rather than timestamps:
+overwriting the previous value would make "did this session's location ever
+change" unanswerable from stored data. A future impossible-travel check
+(Phase 06+) needs the _sequence_ of observations, not just the latest one —
+capturing it now, before any consumer of it exists, is the same call
+`AuditLogEntry`'s hash chain and the credential lockout counter both made:
+build the primitive before the feature that reads it, because retrofitting
+history onto data that was only ever overwritten is not possible after the
+fact.
+
+Refresh token rotation and reuse detection (the `RefreshToken` entity and
+`RefreshTokenReuseDetected` event already sitting, unused, in this package)
+are deliberately **not** part of this — `RefreshAccessToken` re-signs the
+access token against the session's _existing_ refresh token hash rather than
+rotating it. Building rotation was a bigger change than the metadata-capture
+issue asked for, and folding it in here would have coupled two independent
+pieces of work behind one pull request. It can be layered on top later
+without touching the metadata-capture behavior.
+
+### Logout and LogoutEverywhere both revoke two things, not one
+
+Verixa's access tokens are stateless JWTs, verified without a database round
+trip. That is what makes them fast, and it is also what makes "revoke a
+session" harder than it sounds: revoking the _refresh_ token (so no further
+`RefreshAccessToken` call succeeds) does nothing about an access token
+already issued, which keeps authenticating requests until its own `exp`
+regardless. `Logout` and `LogoutEverywhere` therefore both do two things —
+revoke the session (or every session) and denylist its `currentAccessToken`
+through a `RevocationList` — because doing only one would leave a live
+credential behind. See the class docs on `Logout` for the full reasoning, and
+`docs/guides/database.md`/the `RevocationList` port for why this is a
+separate mechanism from the session store rather than a column on it.
+
+`LogoutEverywhere` only touches sessions that existed at the moment it reads
+them — a login racing immediately after is a different, later row it never
+saw, and is unaffected by design. See the class docs for why that is the
+right behavior rather than a gap.
+
+### Concurrent session limits evict, they do not refuse
+
+`IssueSession` takes an optional `maxConcurrentSessions` (surfaced as
+`SESSION_MAX_CONCURRENT_SESSIONS` in `@verixa/config`, default `0` /
+disabled). Reaching the limit does not reject the new login — it evicts the
+least-recently-active existing session first, denylists that session's access
+token the same way `Logout` does, and logs the eviction via
+`SessionAuditLogger`. Refusing the new login instead was the alternative
+considered and rejected: a user who has genuinely forgotten about an old
+signed-in device should not be locked out of a brand-new one, and eviction
+gets the same security property (bounding how many sessions can be alive at
+once) without that cost.
+
+The limit is a constructor parameter on `IssueSession`, not a value baked
+into the domain, for the same reason `AuthenticateWithPassword` takes an
+injectable `LockoutPolicy`: it is a per-deployment product decision (a
+banking app and a consumer SaaS product reasonably disagree on it), and the
+composition root — not this package — is where environment configuration
+belongs.
 
 ## Related
 
 - `docs/security/password-storage.md` — argon2id parameters, the PHC format,
   and why the hash is self-describing.
 - `docs/security/token-storage.md` — how tokens are stored once they exist.
+
+## Admin-Assisted MFA Recovery Flow
+
+When a user has lost all MFA methods and backup codes, an administrator initiates recovery via `RecoverMfaAccess`. The flow is:
+
+1. Admin authenticates separately (outside this use case) and constructs a recovery command with their `actorAdminId` and a written `reason`.
+2. Use case validates the command (non-empty actor, non-empty reason) and emits `mfa.recovery.initiated` to the audit log.
+3. All active and pending MFA methods for the target user are disabled.
+4. All active sessions for the target user are revoked via `SessionRevoker`.
+5. Use case emits `mfa.recovery.completed` with counts.
+6. On the user's next login, the MFA enforcement policy detects no active methods and gates on re-enrollment.
+
+The recovery cannot be self-triggered: the use case always requires a non-empty `actorAdminId` distinct from the user, enforcing that a human admin with elevated access authorises each recovery event.
+
+- `docs/guides/use-cases.md` — the reviewer-decision use cases, why a
+  rationale note is mandatory on every approval or rejection, and why the
+  claim and status-transition rules live on the aggregate rather than in the
+  use case. A verification decision is recorded attribution plus reason for
+  the same auditability this document argues for on the authentication side.

@@ -4,6 +4,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import { Result } from "@verixa/shared-kernel";
 import { beforeAll, describe, expect, it } from "vitest";
 
+import { LocalTransactionSigner } from "../signing/local-transaction-signer.js";
 import { hashAnchorContract } from "../testing/contracts/hash-anchor.contract.js";
 
 import { StellarHashAnchor } from "./stellar-hash-anchor.js";
@@ -123,7 +124,10 @@ describe("StellarHashAnchor (live testnet)", () => {
 
   beforeAll(async () => {
     const keypair = await getSharedFundedAccount();
-    anchor = new StellarHashAnchor({ secretKey: keypair.secret(), network: "testnet" });
+    anchor = new StellarHashAnchor({
+      signer: new LocalTransactionSigner(keypair.secret()),
+      network: "testnet",
+    });
   }, FUNDING_TIMEOUT_MS);
 
   it(
@@ -190,7 +194,10 @@ describe("StellarHashAnchor contract compliance (live testnet)", () => {
 
   beforeAll(async () => {
     const keypair = await getSharedFundedAccount();
-    sharedAnchor = new StellarHashAnchor({ secretKey: keypair.secret(), network: "testnet" });
+    sharedAnchor = new StellarHashAnchor({
+      signer: new LocalTransactionSigner(keypair.secret()),
+      network: "testnet",
+    });
   }, FUNDING_TIMEOUT_MS);
 
   // Every contract case reuses one funded account rather than creating its

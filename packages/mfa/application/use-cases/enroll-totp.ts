@@ -17,7 +17,7 @@ export interface EnrollTotpResult {
 
 /**
  * Initiates TOTP enrollment for a user.
- * 
+ *
  * Generates a new TOTP secret, stores a pending MfaMethod, and returns the
  * secret and provisioning URI exactly once. The method cannot be used for
  * authentication until it is confirmed (Issue 104).
@@ -30,7 +30,7 @@ export class EnrollTotp {
 
   async execute(command: EnrollTotpCommand): Promise<Result<EnrollTotpResult, Error>> {
     const userId = asId<"UserId">(command.userId);
-    
+
     // Generate the CSPRNG secret and URI for the user
     const totpSecret = await this.totpAlgorithm.generateSecret(command.accountName);
 
@@ -41,7 +41,7 @@ export class EnrollTotp {
     await this.mfaMethodRepository.save(method);
 
     // Return the secret exactly once. It is never retrievable again in plaintext
-    // by the application once it leaves this scope, as the repository will 
+    // by the application once it leaves this scope, as the repository will
     // persist it using encryption-at-rest (Issue 107).
     return Result.ok({
       methodId: method.id,

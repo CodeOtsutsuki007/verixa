@@ -1,5 +1,6 @@
 import { Email, type User, type UserStatus } from "@verixa/identity";
 import { AccountLockedError, AuthenticationError, Result } from "@verixa/shared-kernel";
+import type { RateLimiter, RateLimitKey } from "@verixa/shared-kernel";
 
 import type { Credential } from "../../domain/entities/credential.js";
 import {
@@ -133,12 +134,27 @@ export class AuthenticateWithPassword {
   constructor(
     private readonly unitOfWork: CredentialsUnitOfWork,
     private readonly passwordHasher: PasswordHasher,
+    private readonly rateLimiter: RateLimiter,
     private readonly lockoutPolicy: LockoutPolicy = DEFAULT_LOCKOUT_POLICY,
   ) {}
 
   async execute(
     command: AuthenticateWithPasswordCommand,
   ): Promise<Result<AuthenticateWithPasswordResult, AuthenticateWithPasswordError>> {
+    // 1. Check rate limit BEFORE any other logic
+    const rateLimitKey: RateLimitKey = {
+      action: "login",
+      identifier: command.email,
+    };
+
+    const limitResult = await this.rateLimiter.check(rateLimitKey);
+    if (!limitResult.allowed) {
+      throw new Error(
+        `Rate limit exceeded for ${rateLimitKey.action} on ${rateLimitKey.identifier}. ` +
+          `Resets at ${new Date(limitResult.resetAt).toISOString()}`,
+      );
+    }
+
     // A malformed address is not a validation error here, unlike everywhere
     // else in the codebase. `Email.create` rejecting "not-an-email" is a
     // perfectly good 400 during registration; on a login endpoint it tells an
@@ -202,6 +218,8 @@ export class AuthenticateWithPassword {
         await repositories.credentials.save(
           credential.recordFailedAttempt(this.lockoutPolicy, now),
         );
+        // Record failed login attempt for rate limiting
+        await this.rateLimiter.recordFailure(rateLimitKey);
         return { kind: "failed" };
       }
 
@@ -253,6 +271,9 @@ export class AuthenticateWithPassword {
       return Result.err(new AuthenticationError());
     }
     const verified = { user: outcome.user, credential: outcome.credential };
+
+    // Reset rate limit counter on successful authentication
+    await this.rateLimiter.reset(rateLimitKey);
 
     // Deliberately outside the transaction above.
     //

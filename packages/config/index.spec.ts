@@ -20,6 +20,9 @@ describe("loadConfig", () => {
       DATABASE_URL: "postgres://user:pass@db.example.com:5432/verixa",
       DATABASE_POOL_SIZE: 10,
       DATABASE_POOL_TIMEOUT_SECONDS: 10,
+      SESSION_MAX_CONCURRENT_SESSIONS: 0,
+      MFA_ENFORCEMENT_LEVEL: "optional",
+      MFA_ALLOWED_METHODS: [],
     });
   });
 
@@ -41,6 +44,9 @@ describe("loadConfig", () => {
       DATABASE_URL: "postgres://verixa:verixa@localhost:5432/verixa",
       DATABASE_POOL_SIZE: 10,
       DATABASE_POOL_TIMEOUT_SECONDS: 10,
+      SESSION_MAX_CONCURRENT_SESSIONS: 0,
+      MFA_ENFORCEMENT_LEVEL: "optional",
+      MFA_ALLOWED_METHODS: [],
     });
   });
 
@@ -93,5 +99,22 @@ describe("loadConfig", () => {
 
   it("rejects a malformed DATABASE_URL", () => {
     expect(() => loadConfig({ DATABASE_URL: "not-a-url" })).toThrowError(ConfigError);
+  });
+
+  it("defaults SESSION_MAX_CONCURRENT_SESSIONS to 0 (disabled)", () => {
+    const config = loadConfig({});
+
+    expect(config.SESSION_MAX_CONCURRENT_SESSIONS).toBe(0);
+  });
+
+  it("coerces SESSION_MAX_CONCURRENT_SESSIONS from a string", () => {
+    const config = loadConfig({ SESSION_MAX_CONCURRENT_SESSIONS: "3" });
+
+    expect(config.SESSION_MAX_CONCURRENT_SESSIONS).toBe(3);
+    expect(typeof config.SESSION_MAX_CONCURRENT_SESSIONS).toBe("number");
+  });
+
+  it("rejects a negative SESSION_MAX_CONCURRENT_SESSIONS", () => {
+    expect(() => loadConfig({ SESSION_MAX_CONCURRENT_SESSIONS: "-1" })).toThrowError(ConfigError);
   });
 });

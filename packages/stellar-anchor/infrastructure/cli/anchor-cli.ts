@@ -1,7 +1,11 @@
 #!/usr/bin/env node
+import { Keypair } from "@stellar/stellar-sdk";
 import { Result } from "@verixa/shared-kernel";
 
+import { stroopsToXlm, type AnchorFundingAlert } from "../../application/ports/account-balance.js";
 import { isValidSha256Hex } from "../../application/ports/hash-anchor.js";
+import { LocalTransactionSigner } from "../signing/local-transaction-signer.js";
+import { AnchorBalanceMonitor, HorizonAccountBalanceReader } from "../balance-monitor.js";
 import { StellarHashAnchor, type StellarNetwork } from "../stellar/stellar-hash-anchor.js";
 
 /**
@@ -17,16 +21,35 @@ import { StellarHashAnchor, type StellarNetwork } from "../stellar/stellar-hash-
  *
  * Verifying needs no secret key and no funded account — it only reads public
  * ledger data.
+ *
+ * ## Anchoring through this CLI is a development path
+ *
+ * The CLI signs with a key read from the environment, which is the arrangement
+ * `TransactionSigner` was introduced to replace. It stays because a testnet
+ * experiment should not require a KMS, and because the alternative — no CLI at
+ * all — would push operators to write their own, worse version. So it refuses to
+ * sign on the public network unless explicitly overridden. Production anchoring
+ * goes through the API's composition root, where a `KmsTransactionSigner` is
+ * wired. See `docs/security/stellar-key-management.md`.
  */
 
 const USAGE = `
 Usage:
   anchor  <sha256-hex>                 Anchor a hash to Stellar (requires STELLAR_ANCHOR_SECRET_KEY)
   verify  <sha256-hex> <anchor-ref>    Check that a Stellar transaction commits to a hash
+  balance                              Report the anchoring account's balance as a metric line
 
 Environment:
   STELLAR_ANCHOR_SECRET_KEY   Secret key (S...) of the anchoring account. Required for "anchor".
+                              Development and testnet only; see the note in this file's header.
   STELLAR_NETWORK             "testnet" (default) or "public".
+  STELLAR_ALLOW_LOCAL_SIGNING Set to "1" to permit signing with the above on the public network.
+  STELLAR_ANCHOR_PUBLIC_KEY   Account to report in "balance", if the secret key is not available.
+  STELLAR_NETWORK             "testnet" (default) or "public".
+  STELLAR_ANCHOR_MIN_XLM      Alert threshold in XLM for "balance". Defaults to 1.
+
+"balance" exits 0 when funded, 1 below the threshold, and 2 when the account
+cannot cover a fee, the balance is unreadable, or Horizon is unreachable.
 `.trim();
 
 function fail(message: string): never {
@@ -42,8 +65,74 @@ function resolveNetwork(): StellarNetwork {
   return value;
 }
 
+/**
+ * Prints the anchoring account's balance as one structured metric line and
+ * exits non-zero when the account is running down, so the same command can be
+ * a dashboard input and a cron probe.
+ *
+ * Reads the account with `STELLAR_ANCHOR_PUBLIC_KEY` when it is available: a
+ * funding check has no need for a signing key, and the process that watches
+ * the account should not be the process that can spend it. The secret key is
+ * accepted only as a fallback, deriving the public one from it.
+ */
+async function reportBalance(): Promise<never> {
+  const network = resolveNetwork();
+  const thresholdXlm = Number(process.env["STELLAR_ANCHOR_MIN_XLM"] ?? "1");
+  if (!Number.isFinite(thresholdXlm) || thresholdXlm < 0) {
+    fail("STELLAR_ANCHOR_MIN_XLM must be a non-negative number of XLM.");
+  }
+
+  const secretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
+  const publicKey =
+    process.env["STELLAR_ANCHOR_PUBLIC_KEY"] ??
+    (secretKey === undefined || secretKey.length === 0
+      ? undefined
+      : Keypair.fromSecret(secretKey).publicKey());
+
+  if (publicKey === undefined) {
+    fail(
+      "balance needs STELLAR_ANCHOR_PUBLIC_KEY (preferred) or STELLAR_ANCHOR_SECRET_KEY to derive it from.",
+    );
+  }
+
+  const alerts: AnchorFundingAlert[] = [];
+  const monitor = new AnchorBalanceMonitor({
+    reader: new HorizonAccountBalanceReader({ network }),
+    publicKey,
+    thresholdXlm,
+    alerter: { alert: (alert) => void alerts.push(alert) },
+  });
+
+  const status = await monitor.check();
+
+  console.log(
+    JSON.stringify({
+      name: "verixa_stellar_anchor_balance_xlm",
+      network,
+      publicKey,
+      status: status.kind,
+      availableXlm:
+        status.kind === "unknown" ? undefined : stroopsToXlm(status.balance.availableStroops),
+      thresholdXlm,
+    }),
+  );
+
+  for (const alert of alerts) {
+    console.error(`ALERT ${alert.kind}: ${alert.message}`);
+  }
+
+  // 0 funded, 1 below the alert threshold, 2 cannot pay a fee or cannot be
+  // read at all — the difference lets a probe distinguish "top it up soon"
+  // from "anchoring is not happening", which are different urgencies.
+  process.exit(status.kind === "funded" ? 0 : status.kind === "below_threshold" ? 1 : 2);
+}
+
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
+
+  if (command === "balance") {
+    await reportBalance();
+  }
 
   if (command !== "anchor" && command !== "verify") {
     fail(USAGE);
@@ -64,11 +153,10 @@ async function main(): Promise<void> {
       );
     }
 
-    // Verification only reads public ledger data, so the key here is
-    // irrelevant — but the adapter needs *a* valid keypair to construct.
-    // A throwaway one keeps verification usable with no credentials at all.
-    const { Keypair } = await import("@stellar/stellar-sdk");
-    const anchor = new StellarHashAnchor({ secretKey: Keypair.random().secret(), network });
+    // No signer at all: verification only reads public ledger data. This used to
+    // require a throwaway keypair purely to satisfy the constructor, which is the
+    // kind of credential-shaped fiction that ends up in a runbook.
+    const anchor = new StellarHashAnchor({ network });
 
     const result = await anchor.verify(hash, anchorRef);
     if (Result.isErr(result)) {
@@ -84,12 +172,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  if (network === "public" && process.env["STELLAR_ALLOW_LOCAL_SIGNING"] !== "1") {
+    fail(
+      "Refusing to sign on the public network with a key from the environment.\nSet STELLAR_ALLOW_LOCAL_SIGNING=1 only if you accept the risk described in docs/security/stellar-key-management.md, and wire a KmsTransactionSigner instead.",
+    );
+  }
+
   const secretKey = process.env["STELLAR_ANCHOR_SECRET_KEY"];
   if (secretKey === undefined || secretKey.length === 0) {
     fail("STELLAR_ANCHOR_SECRET_KEY must be set to anchor a hash.");
   }
 
-  const anchor = new StellarHashAnchor({ secretKey, network });
+  const anchor = new StellarHashAnchor({ signer: new LocalTransactionSigner(secretKey), network });
   const result = await anchor.anchor(hash);
 
   if (Result.isErr(result)) {
