@@ -4,5 +4,5 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["index.ts", "index.spec.ts", "prisma/seed.ts"]
+  "include": ["index.ts", "index.spec.ts", "prisma/seed.ts", "scripts/**/*"]
 }

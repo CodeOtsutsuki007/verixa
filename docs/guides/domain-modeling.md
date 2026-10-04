@@ -201,7 +201,40 @@ pushing that logic somewhere else. This previews the broader multi-tenancy
 question `planning/ARCHITECTURE.md` §8 discusses: organizations, membership,
 and (starting Phase 07) role assignment are kept as separate, composable
 concepts rather than one wide "user-org-role" record, so each can evolve
-independently.
+
+### Multi-tenancy modeling: why `UserRoleAssignment` is its own entity
+
+Following the same decoupling principle as `OrganizationMembership`, role
+assignment is modeled as a distinct domain entity (`UserRoleAssignment` in
+`packages/authorization/domain/entities/user-role-assignment.ts`) linking
+`userId` to `roleId`, scoped by `orgId` (nullable for global roles), with
+`assignedAt`, `assignedBy`, and optional `expiresAt`.
+
+We explicitly rejected two common alternatives:
+
+1. **Embedding roles on `User` (e.g. `user.roles: Role[]`):** Storing roles
+   directly on `User` conflates authentication and identity with access
+   control. It also fails to support multi-tenancy — a user cannot hold
+   `admin` in Organization A and `viewer` in Organization B if roles belong to
+   the user globally.
+2. **Coupling roles directly to `OrganizationMembership`:** Embedding a role on
+   membership assumes every role assignment is tied to a specific organization.
+   This breaks down for system-wide administrative roles (such as a global
+   compliance auditor or platform administrator) that operate across all
+   tenants, and makes temporary elevation (time-bound roles that expire via
+   `expiresAt`) unnecessarily awkward by requiring membership mutations.
+
+#### Strict scope invariants
+
+To prevent subtle authorization bugs, `UserRoleAssignment` strictly rejects
+ambiguous scopes during construction. A caller must explicitly supply either:
+
+- A non-empty, non-whitespace `orgId` for organization-scoped roles, or
+- Explicit `null` for global roles.
+
+Omitting `orgId` (or passing `undefined`) is rejected with a `ValidationError`.
+This ensures that an operator or caller cannot accidentally grant a global,
+system-wide role when they simply forgot to pass an organization context.
 
 ## Ports & adapters (hexagonal architecture)
 

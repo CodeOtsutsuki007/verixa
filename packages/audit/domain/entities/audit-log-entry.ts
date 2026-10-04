@@ -38,7 +38,11 @@ export type AuditAction =
   | "user.login_failed"
   | "user.locked_out"
   | "user.password_reset_requested"
-  | "user.password_reset_completed";
+  | "user.password_reset_completed"
+  // Reads of the audit log itself — see `domain/policies/audit-access-policy.ts`.
+  | "audit.queried"
+  | "audit.exported"
+  | "audit.access_denied";
 
 /**
  * The genesis link.
@@ -179,9 +183,9 @@ export class AuditLogEntry {
     action: AuditAction;
     actorId?: string | undefined;
     subjectId?: string | undefined;
-    metadata?: Readonly<Record<string, string>>;
+    metadata?: Readonly<Record<string, string>> | undefined;
     previous?: AuditLogEntry | undefined;
-    occurredAt?: Date;
+    occurredAt?: Date | undefined;
   }): AuditLogEntry {
     const body = {
       sequence: params.previous === undefined ? 1 : params.previous.sequence + 1,
