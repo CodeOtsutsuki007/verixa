@@ -4,7 +4,7 @@ import {
   RegisterUserWithPassword,
 } from "@verixa/credentials";
 import { DisplayName, Email, User } from "@verixa/identity";
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { createTestPrismaClient, databaseAvailability } from "./helpers/database.js";
@@ -25,7 +25,11 @@ const hasher = new Argon2PasswordHasher({ memoryCost: 64, timeCost: 1, paralleli
 
 describe.skipIf(!available)("RegisterUserWithPassword (real Postgres)", () => {
   const prisma = createTestPrismaClient();
-  const useCase = new RegisterUserWithPassword(new PrismaCredentialsUnitOfWork(prisma), hasher);
+  const useCase = new RegisterUserWithPassword(
+    new PrismaCredentialsUnitOfWork(prisma),
+    hasher,
+    new NoopRateLimiter(),
+  );
 
   beforeAll(async () => {
     await prisma.$connect();

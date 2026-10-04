@@ -33,10 +33,10 @@ export type DomainEventHandler<E extends DomainEvent = DomainEvent> = (
 
 /**
  * The port aggregates' recorded events are eventually delivered through.
- * Deliberately interface-only for now — no in-process or message-broker
- * implementation exists yet (see `docs/guides/domain-events.md`), so nothing
- * in the codebase can accidentally depend on a specific delivery mechanism
- * before one is chosen.
+ * `InMemoryEventPublisher` is the in-process implementation the composition
+ * root wires up; a broker-backed one remains separable future work, and
+ * nothing above this interface depends on which is in place — see
+ * `docs/guides/domain-events.md`.
  */
 export interface DomainEventPublisher {
   publish(event: DomainEvent): void | Promise<void>;

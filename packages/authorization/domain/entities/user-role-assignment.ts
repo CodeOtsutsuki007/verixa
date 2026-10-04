@@ -4,6 +4,7 @@ export type UserRoleAssignmentId = Id<"UserRoleAssignmentId">;
 export type UserId = Id<"UserId">;
 export type RoleId = Id<"RoleId">;
 export type OrgId = Id<"OrgId">;
+export type OrgId = Id<"OrganizationId">;
 
 export interface UserRoleAssignmentProps {
   readonly id: UserRoleAssignmentId;

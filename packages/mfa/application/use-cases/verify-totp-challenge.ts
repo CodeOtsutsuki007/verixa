@@ -12,9 +12,9 @@ export type VerifyTotpChallengeError = Error | AccountLockedError | ValidationEr
 
 /**
  * Verifies a submitted TOTP code against an active method during login or step-up.
- * 
- * Allows a minor configurable clock drift (e.g. ±1 step) but strictly rejects
- * code reuse within the same step. On success, updates the method's lastUsedAt 
+ *
+ * Allows a minor configurable clock drift (e.g. ï¿½1 step) but strictly rejects
+ * code reuse within the same step. On success, updates the method's lastUsedAt
  * and lastUsedStep to prevent replay.
  */
 export class VerifyTotpChallenge {
@@ -23,7 +23,9 @@ export class VerifyTotpChallenge {
     private readonly totpAlgorithm: TotpAlgorithm,
   ) {}
 
-  async execute(command: VerifyTotpChallengeCommand): Promise<Result<void, VerifyTotpChallengeError>> {
+  async execute(
+    command: VerifyTotpChallengeCommand,
+  ): Promise<Result<void, VerifyTotpChallengeError>> {
     if (!command.code || command.code.length !== 6) {
       return Result.err(new ValidationError("TOTP code must be 6 digits."));
     }
@@ -48,9 +50,9 @@ export class VerifyTotpChallenge {
       return Result.err(new Error("MFA method is missing its secret."));
     }
 
-    // Verify code, allowing ±1 drift window (30s past or future)
+    // Verify code, allowing ï¿½1 drift window (30s past or future)
     const matchedStep = await this.totpAlgorithm.verify(method.secret, command.code, 1);
-    
+
     if (matchedStep === null) {
       const updatedMethod = method.recordFailedAttempt(now);
       await this.mfaMethodRepository.save(updatedMethod);
