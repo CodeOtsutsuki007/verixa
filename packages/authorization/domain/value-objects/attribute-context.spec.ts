@@ -40,6 +40,8 @@ describe("AttributeContext", () => {
     expect(Object.isFrozen(immutable.getArray("subject", "roles"))).toBe(true);
   });
     it("supports typed lookups across all four attribute categories", () => {
+
+  it("supports typed lookups across all four attribute categories", () => {
     const context = AttributeContext.create({
       subject: { id: "user-1", role: "admin" },
       resource: { ownerId: "user-2", sensitivity: "high" },
