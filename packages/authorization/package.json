@@ -14,9 +14,6 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@verixa/shared-kernel": "workspace:*"
-  },
-  "devDependencies": {
     "@verixa/database": "workspace:*",
     "@verixa/shared-kernel": "workspace:*"
   },
