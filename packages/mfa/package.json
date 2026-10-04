@@ -7,6 +7,26 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "lint": "eslint .",
+    "benchmark": "tsx scripts/benchmark-repositories.ts"
+  },
+  "dependencies": {
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "tsx": "^4.23.13",
+    "lint": "eslint ."
     "build": "node -e \"console.log('packages/mfa is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
     "typecheck": "node -e \"console.log('packages/mfa is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
     "test": "node -e \"console.log('packages/mfa is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",

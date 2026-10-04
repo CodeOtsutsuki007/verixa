@@ -21,6 +21,22 @@ import { withMappedErrors } from "./error-mapper.js";
 import { toDbVerificationType, VerificationRequestMapper } from "./verification-request-mapper.js";
 
 /**
+ * The queue filter above, spelled in Prisma's where-input shape.
+ *
+ * Declared locally rather than reaching for Prisma's generated input type so
+ * this file only depends on the pieces of it that are actually used; the
+ * adapter still hands the object to `findMany`, which type-checks it against
+ * the real input type at the call site.
+ */
+interface QueueCandidateWhere {
+  status?: { in: DbVerificationStatus[] };
+  type?: DbVerificationType;
+  assignedReviewerId?: { not: null } | null;
+  claimExpiresAt?: { gt: Date } | { lte: Date };
+  OR?: QueueCandidateWhere[];
+}
+
+/**
  * Prisma-backed `VerificationRequestRepository`. Satisfies the same port — and
  * passes the same behavioral contract — as
  * `InMemoryVerificationRequestRepository`, which is what makes the two
@@ -58,13 +74,36 @@ export class PrismaVerificationRequestRepository implements VerificationRequestR
     return rows.map((row) => VerificationRequestMapper.toDomain(row));
   }
 
+  /**
+   * The filtered, paginated queue read.
+   *
+   * The `assignment` filter is the only part worth reading twice. A claim is a
+   * lease, so "is this row assigned?" is not `assigned_reviewer_id IS NOT NULL`
+   * — a row whose `claim_expires_at` has passed still carries its reviewer id
+   * (nothing clears it on expiry, there is no scheduled job) and is back in the
+   * queue. `assigned` therefore requires a live lease, and `unassigned` is the
+   * `OR` of "never claimed" and "claimed but lapsed". Both spellings of
+   * *unassigned* are matched so the predicate lines up with
+   * `VerificationRequest.isClaimableAt` and with the in-memory fake, which the
+   * shared contract suite asserts.
+   */
   async findQueueCandidates(options: QueueCandidateOptions = {}): Promise<VerificationRequest[]> {
-    const where: { status?: DbVerificationStatus; type?: DbVerificationType } = {};
-    if (options.status !== undefined) {
-      where.status = options.status;
+    const now = options.now ?? new Date();
+    const where: QueueCandidateWhere = {};
+
+    if (options.statuses !== undefined) {
+      // Copied into a mutable array: the port exposes the filter as a
+      // `readonly` list, and Prisma's `in` is a mutable one.
+      where.status = { in: [...options.statuses] };
     }
     if (options.verificationType !== undefined) {
       where.type = toDbVerificationType(options.verificationType);
+    }
+    if (options.assignment === "assigned") {
+      where.assignedReviewerId = { not: null };
+      where.claimExpiresAt = { gt: now };
+    } else if (options.assignment === "unassigned") {
+      where.OR = [{ assignedReviewerId: null }, { claimExpiresAt: { lte: now } }];
     }
 
     const rows = await this.prisma.verificationRequest.findMany({
