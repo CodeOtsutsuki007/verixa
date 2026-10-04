@@ -17,6 +17,11 @@
     "@verixa/shared-kernel": "workspace:*"
   },
   "devDependencies": {
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
     "@types/node": "^22.10.0",
     "@vitest/coverage-v8": "^2.1.9",
     "typescript": "^5.7.2",

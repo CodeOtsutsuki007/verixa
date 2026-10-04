@@ -193,6 +193,10 @@ jobs:
           steps.assess.outputs.added > 600 ||
           steps.assess.outputs.packages > 2 ||
           steps.description.outputs.words < 15
+        # Fork PR tokens may not have comment permissions even when the
+        # workflow requests them. Reviewability is advisory, so that must not
+        # turn the check red.
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |

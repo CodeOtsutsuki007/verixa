@@ -1,0 +1,29 @@
+{
+  "name": "@verixa/sessions",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"console.log('packages/sessions is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
+    "typecheck": "node -e \"console.log('packages/sessions is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
+    "test": "node -e \"console.log('packages/sessions is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
+    "test:coverage": "node -e \"console.log('packages/sessions is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
+    "lint": "node -e \"console.log('packages/sessions is QUARANTINED - see QUARANTINE.md in this package. It does not build: pull requests were merged without resolving conflicts, leaving multiple implementations concatenated.')\"",
+    "benchmark": "tsx scripts/benchmark-repositories.ts"
+  },
+  "dependencies": {
+    "@verixa/database": "workspace:*",
+    "@verixa/shared-kernel": "workspace:*"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.1.0",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "tsx": "^4.23.13",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

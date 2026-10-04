@@ -62,16 +62,35 @@ _something happened_, not who might care. Audit, notifications, or any
 future context subscribe to the event instead, each independently, without
 identity needing to know they exist.
 
-## The publisher port, and why it's interface-only right now
+## The publisher port, and what implements it
 
-`DomainEventPublisher` (`publish`/`subscribe`) is defined but has **no
-implementation yet** — Issue 026 scoped it as interface-only deliberately.
-Aggregates already record events (retrievable via `pullDomainEvents()`, see
-below) independently of whether anything publishes them; wiring an actual
-in-process dispatcher (or later, something broker-backed) is separable work
-that doesn't block anything built so far, and choosing that implementation
-prematurely risks coupling the interface's shape to one specific delivery
-mechanism's needs.
+`DomainEventPublisher` (`publish`/`subscribe`) was scoped as interface-only in
+Issue 026, deliberately: wiring a dispatcher before anything needed one risks
+coupling the interface's shape to one delivery mechanism's requirements.
+
+That step has now been taken, and it is worth being precise about how far it
+goes. `InMemoryEventPublisher`
+(`packages/shared-kernel/infrastructure/in-memory-event-publisher.ts`) is an
+in-process, synchronous implementation: handlers run in subscription order,
+within the request that published the event, so a side effect such as an audit
+record exists before the caller sees a response. The trade is that a slow
+handler blocks the request; if that becomes a real problem the answer is the
+out-of-process bus (Phase 21), not making this one async.
+
+What is **not** true yet is that anything publishes. No aggregate-driven
+context in this repository emits events on a code path today — the auth routes
+record their audit entries directly (see
+`docs/guides/composition-root.md`), and the contexts that would publish
+`sessions.session.created` or `rbac.role.assigned` are still being built. The
+audit subscribers are registered in the composition root ahead of those
+publishers on purpose: registration is eager because an event published with no
+subscriber attached is dropped permanently, and the first event a process
+publishes is the one a late registration loses. A subscriber wired before its
+publisher exists does nothing; one wired after it exists loses everything up to
+that point.
+
+A broker-backed implementation remains separable future work; nothing above the
+port depends on which one is in place.
 
 ## `pullDomainEvents()` and Verixa's immutable-entity twist
 
@@ -98,6 +117,38 @@ aggregate before pulling events, this scheme would need to accumulate
 across calls instead — revisit this design if/when that need actually
 arises, rather than generalizing for it now.
 
+## Cross-context event handling
+
+Domain events allow bounded contexts to react to each other's state changes
+without directly importing each other's code or inverting the dependency
+graph.
+
+### UserStatusChanged → Credentials invalidation
+
+When the **Identity** context soft-deletes a user (via `User.delete()`), it
+emits a `UserStatusChanged` event with `newStatus === "deleted"`. The
+**Credentials** context listens for this event via `HandleUserDeleted`
+(Issue 075), which atomically:
+
+1. Invalidates all outstanding email verification tokens (`consumedAt` is set)
+2. Invalidates all outstanding password reset tokens (`consumedAt` is set)
+3. Clears the credential's failure counter and any lockout state
+
+This ensures a soft-deleted user cannot:
+
+- Authenticate with a retained password
+- Use a verification link generated before deletion
+- Use a password reset link generated before deletion
+
+The handler is intentionally defensive: if a user has no credential record
+(SSO-only or passkey-only accounts), no error is raised — the operation
+logically completes because there is nothing to clean up.
+
+**Pattern**: The Identity context knows nothing about Credentials. Credentials
+reacts to Identity events. Neither context imports the other directly — they
+are decoupled through events and the `CredentialsUnitOfWork` port, which
+crosses the boundary.
+
 ## Event catalog
 
 | Event                           | Aggregate    | Recorded when                                                                                                 |
@@ -113,3 +164,23 @@ arises, rather than generalizing for it now.
 audit trail — see `docs/guides/use-cases.md`).
 
 This table grows as later issues add events for other aggregates.
+
+## Audit subscribers
+
+`IdentityCredentialsAuditSubscriber` in `@verixa/audit` is the first downstream
+consumer of the publisher port. The composition root supplies the in-process
+`DomainEventPublisher` and the `RecordAuditEvent` use case; identity and
+credentials do not import audit or call it directly.
+
+The subscriber registers one handler for each identity event currently present
+and for the credential event names planned by Phases 02–04. A supported event
+is translated into exactly one audit action, with the aggregate id becoming
+the subject id. Fields are copied into the flat string metadata map only when
+they are strings; the subscriber does not serialize an arbitrary event object
+into the audit log.
+
+An audit write failure is reported to the supplied error handler and is not
+allowed to reject the publisher callback. This is intentional: audit is a
+downstream record of an operation that has already happened. Turning a failed
+audit insert into a failed registration would give callers a false result and
+would couple the identity and credentials contexts back to audit persistence.

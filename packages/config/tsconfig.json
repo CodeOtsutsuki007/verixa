@@ -4,5 +4,11 @@
     "outDir": "dist",
     "rootDir": "."
   },
-  "include": ["index.ts", "index.spec.ts"]
+  "include": [
+    "index.ts",
+    "index.spec.ts",
+    "config-error.ts",
+    "signing-keys.ts",
+    "signing-keys.spec.ts"
+  ]
 }
