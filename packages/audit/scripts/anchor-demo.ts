@@ -17,7 +17,7 @@
  */
 import { Keypair } from "@stellar/stellar-sdk";
 import { Result } from "@verixa/shared-kernel";
-import { StellarHashAnchor } from "@verixa/stellar-anchor";
+import { LocalTransactionSigner, StellarHashAnchor } from "@verixa/stellar-anchor";
 
 import { AnchorAuditLog } from "../application/use-cases/anchor-audit-log.js";
 import { RecordAuditEvent } from "../application/use-cases/record-audit-event.js";
@@ -87,7 +87,14 @@ async function main(): Promise<void> {
   log(`   ${keypair.publicKey()}`);
 
   log("\n4. Anchoring the chain head to Stellar");
-  const anchor = new StellarHashAnchor({ secretKey: keypair.secret(), network: "testnet" });
+  // A local, in-process signer: this demo has no KMS to talk to and a throwaway
+  // testnet account to spend, which is exactly the case `LocalTransactionSigner`
+  // exists for. A real deployment wires `KmsTransactionSigner` instead, so no
+  // process ever holds the seed -- docs/security/stellar-key-management.md.
+  const anchor = new StellarHashAnchor({
+    signer: new LocalTransactionSigner(keypair.secret()),
+    network: "testnet",
+  });
   const anchored = await new AnchorAuditLog(auditLog, anchorRecords, anchor).execute();
 
   if (Result.isErr(anchored)) {

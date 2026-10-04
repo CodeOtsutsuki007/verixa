@@ -1,5 +1,5 @@
 import { Email, type User } from "@verixa/identity";
-import { Result } from "@verixa/shared-kernel";
+import { NoopRateLimiter, Result } from "@verixa/shared-kernel";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { EmailVerificationToken } from "../../domain/entities/email-verification-token.js";
@@ -56,6 +56,7 @@ describe("email verification (Issue 068)", () => {
     const registered = await new RegisterUserWithPassword(
       unitOfWork,
       new Argon2PasswordHasher(FAST),
+      new NoopRateLimiter(),
     ).execute({ email: EMAIL, displayName: "Alice", password: PASSWORD });
     if (!Result.isOk(registered)) throw new Error("fixture setup failed");
   });
