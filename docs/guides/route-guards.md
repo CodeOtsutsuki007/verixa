@@ -59,3 +59,42 @@ app.delete(
    }
    ```
    Permission identifiers (e.g. `orgs:delete`) are never reflected back to unauthorized callers, preventing external permission-enumeration oracle attacks.
+
+---
+
+## Request-Scoped Principal Resolution & Per-Request Memoization (Issue 137)
+
+### Problem Statement
+
+When complex routes compose multiple authorization guards (or execute route handlers that perform secondary permission checks), evaluating permissions repeatedly against the database/cache adds latency and CPU overhead.
+
+### `createResolvePrincipalHook`
+
+The `createResolvePrincipalHook` (`packages/authorization/interface/hooks/resolve-principal.ts`) runs as a Fastify `onRequest` or `preHandler` hook.
+
+```ts
+import { createResolvePrincipalHook, requirePermission } from "@verixa/authorization";
+
+// Register resolution hook globally or per-router scope
+app.addHook("preHandler", createResolvePrincipalHook(permissionChecker));
+
+// Subsequent guards on the route reuse the memoized request.principal.permissions
+app.get(
+  "/admin/reports",
+  {
+    preHandler: [
+      requirePermission(permissionChecker, "reports:read"),
+      requirePermission(permissionChecker, "audit:read"),
+    ],
+  },
+  async (request, reply) => {
+    return { data: [] };
+  },
+);
+```
+
+### Architectural Guarantees & Memoization Rationale
+
+1. **Per-Request Memoization (Request Lifetime Only):** Permissions are resolved exactly once and stored on `request.principal.permissions`.
+2. **Freshness Over Cross-Request Caching:** Cross-request permission caching was deliberately **rejected**. Caching permissions across HTTP requests would reintroduce the risk of serving stale permissions after a role revocation or session termination (similar to the session invalidation guarantees in Issue 088). Per-request memoization delivers high performance for complex pipelines while ensuring absolute freshness for every new incoming request.
+3. **Unauthenticated Safety:** If a request has not been authenticated, the resolution hook completes as a no-op without throwing errors, allowing upstream auth middleware or downstream guards to handle unauthenticated requests consistently.

@@ -82,6 +82,11 @@ export {
   type RequestWithPrincipal,
 } from "./interface/guards/require-permission.js";
 export {
+  createResolvePrincipalHook,
+  type PermissionResolverLike,
+  type ResolvePrincipalOptions,
+} from "./interface/hooks/resolve-principal.js";
+export {
   AssignPermissionToRole,
   type AssignPermissionToRoleCommand,
   type AssignPermissionToRoleError,
