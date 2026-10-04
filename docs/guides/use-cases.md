@@ -251,3 +251,71 @@ specific administrative action is allowed to omit, not about what a
 `VerificationRequest` structurally requires. See
 `docs/security/authentication-flows.md` for the reviewer-decision
 cross-reference.
+
+## Read models shaped for their consumer: `ListReviewQueue`
+
+`ListReviewQueue` (Issue 177) is the first use case here that only reads, and
+it is shaped differently from the command handlers above on purpose.
+
+It returns a `ReviewQueuePage` — `items`, `limit`, `offset`, `hasMore` — and
+each `ReviewQueueItem` is a _projection_ of a `VerificationRequest`, not the
+aggregate itself. That projection is the deliverable, not a convenience:
+everything a queue row must not carry has to be absent from the type rather
+than merely unread. Returning the aggregates and letting a serializer pick
+fields would leave "the queue response contains no evidence pointer" to
+whichever HTTP layer is written months later; projecting in the use case makes
+it a property of the read path, testable at the layer that owns it. The test
+that asserts this compares the row's _exact_ key set, so a field added to the
+summary has to be a deliberate edit to the queue rather than a side effect of
+widening the aggregate. This is the same read-model-per-consumer principle as
+Issue 095, applied to a different list.
+
+**The alternative rejected: an `includeEvidenceUrls` flag.** Issue 177's
+wording — "returning signed evidence URLs only on demand" — reads like a
+parameter, and a parameter was the first thing tried. It is the wrong shape
+for now, for two reasons. The port that would mint a signed URL is
+`EvidenceStorage` (Issue 166), which does not exist yet, so an accepted flag
+would either be silently inert or drag a storage adapter into the queue's
+dependency list for one optional field. And signing a URL per row is not "on
+demand": the list view renders no document, so every page of the queue would
+pay for signing work nothing displays. Signing belongs on the per-request
+detail fetch, where the reviewer actually opens the document.
+
+**Why the filters are pushed to the store rather than applied here.**
+`status`, `verificationType`, `assignment`, `limit` and `offset` all go to
+`findQueueCandidates`. A use case that fetched a page and then filtered it
+would return short pages ("25 asked for, three returned") and, worse, skip
+rows that a later page should have contained — the dropped rows were already
+charged against `limit`. The store has the index for this predicate; the use
+case has only the page.
+
+**Why the queue filter takes a set of statuses.** The default queue view spans
+two: `submitted` (waiting on the automated provider check) and `in_review`
+(waiting on a reviewer). Asking the store twice and merging the results cannot
+produce a stable order, because each call is ordered `createdAt ASC`
+independently and the caller ends up re-sorting a partial view — at which
+point `offset` no longer means "rows 26 to 50 of the queue". One query over
+the existing `(status, created_at)` index is both correct and cheaper. The two
+non-reviewable statuses are refused rather than answered with an empty page:
+"the queue is empty" and "you asked the queue for decided requests" are
+different answers, and only one of them is actionable.
+
+**Why `hasMore` and not a total count.** The use case asks the store for one
+row more than the page and reports whether it came back. A `COUNT(*)` is a
+second round-trip over the same predicate, and on a queue that changes while
+it is being read it is also the wrong number — count and page are read at
+different instants, so the total could disagree with the rows actually
+returned. A total is worth having when a UI shows "page 3 of 12" and the cost
+of a second query is paid deliberately; nothing needs it yet, and `hasMore`
+costs one row.
+
+**Why a lapsed lease is not an assignment.** A claim is a lease, not a lock
+(see `ReviewAssignment`), and nothing clears `assigned_reviewer_id` when it
+expires — there is no scheduled job, because the whole point of an expiry is
+that it needs none. So "assigned" means _a live claim_, "unassigned" means
+"never claimed **or** lapsed", and the row reports `claim` only while it is
+live. Reporting a lapsed lease would tell the UI a case is taken when it is
+free to claim. That is also why the filter needs a `now`, supplied by the
+caller exactly as `findActiveClaimByReviewer` already required — the two
+statuses are the cycle that makes this non-linear, and the filter has to agree
+with `VerificationRequest.isClaimableAt` rather than re-derive it.
