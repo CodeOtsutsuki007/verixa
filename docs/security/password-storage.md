@@ -281,6 +281,7 @@ and update the verify path to apply layers in order.
 **Pro:** Upgrades every dormant account with no user involvement. Closes the gap completely.
 
 **Con:** Introduces significant operational complexity:
+
 - Schema change to track wrapping layers (versioning problem)
 - Verify path becomes stateful — must apply layers in correct order
 - Creates future migration debt if the wrapping scheme needs to change
@@ -317,6 +318,7 @@ severe. Building jobs for this single purpose is premature.
 
 Accept the gap as a known, quantified engineering position rather than an unmeasured one. Add a
 query/metric exposing:
+
 - Count of credentials below current cost parameters
 - Age distribution: oldest credential, median age, distribution if applicable
 
@@ -328,6 +330,7 @@ until (if) one of the other approaches is implemented later.
 
 **Why chosen:** At early production maturity (no background job system, no metrics infrastructure),
 measurement is the appropriate response. Once the measurement lands:
+
 - If the gap is small (few old accounts), it doesn't warrant the complexity of Options 1 or 2.
 - If the gap is large, the team has data to justify building background jobs for Option 2 or
   committing to the layered-hash complexity of Option 1.

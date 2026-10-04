@@ -7,10 +7,48 @@ import type {
 import type { VerificationStatusValue } from "../../domain/value-objects/verification-status.js";
 import type { VerificationTypeValue } from "../../domain/value-objects/verification-type.js";
 
-/** Filters for the reviewer queue listing (Issue 177). Unknown fields are ignored rather than rejected. */
+/**
+ * Which side of the queue's claim state a listing wants.
+ *
+ * Three values rather than a boolean, so "the UI has no filter selected" is
+ * stated (`"any"`) rather than inferred from an absent field — inferred
+ * absence is exactly how a filter ends up silently applied by one adapter and
+ * silently ignored by another.
+ */
+export type QueueAssignmentFilter = "any" | "assigned" | "unassigned";
+
+/**
+ * Filters for the reviewer queue listing (Issues 163 and 177). Applied by the
+ * store, not by the caller — see `findQueueCandidates`.
+ *
+ * ## Why `statuses` is a set and not a single status
+ *
+ * The queue's default view spans two statuses: a `submitted` request is
+ * waiting for its automated check (Issue 172) and an `in_review` one is
+ * waiting for a reviewer. Asking the store twice — once per status — and
+ * merging the two pages in the caller cannot produce a stable global order:
+ * each page is ordered `createdAt ASC` independently, so the caller ends up
+ * re-sorting a partial view and `offset` stops meaning "rows 26–50 of the
+ * queue". One query over one `(status, created_at)` index is both correct and
+ * cheaper.
+ *
+ * ## Why `assignment` needs `now`
+ *
+ * A claim is a lease, not a lock (see `ReviewAssignment`), so a request whose
+ * `claim_expires_at` has passed is back in the unassigned queue even though
+ * its `assigned_reviewer_id` column is still populated. Evaluating that needs
+ * the current instant, which the caller supplies rather than each adapter
+ * reading its own clock — the same convention `findActiveClaimByReviewer`
+ * already uses.
+ */
 export interface QueueCandidateOptions {
-  readonly status?: VerificationStatusValue | undefined;
+  /** Statuses to include. Omitted means every status; a queue listing should pass only the statuses it considers reviewable. */
+  readonly statuses?: readonly VerificationStatusValue[] | undefined;
   readonly verificationType?: VerificationTypeValue | undefined;
+  /** Defaults to `"any"` — both claimed and unclaimed requests. */
+  readonly assignment?: QueueAssignmentFilter | undefined;
+  /** The instant `assignment` is evaluated at. Omitted means the adapter reads the clock itself, once. */
+  readonly now?: Date | undefined;
   readonly limit?: number | undefined;
   readonly offset?: number | undefined;
 }
@@ -67,7 +105,14 @@ export interface VerificationRequestRepository {
 
   findBySubject(subjectUserId: VerificationSubjectId): Promise<VerificationRequest[]>;
 
-  /** Queue listing, oldest first. Detail beyond summary fields is fetched per request. */
+  /**
+   * Queue listing, oldest first. Detail beyond summary fields is fetched per
+   * request.
+   *
+   * Filtering and pagination both belong here rather than to the calling use
+   * case: a caller that fetched a page and then filtered it would return short
+   * pages and skip rows that a later page should have contained.
+   */
   findQueueCandidates(options?: QueueCandidateOptions): Promise<VerificationRequest[]>;
 
   /** The request `reviewerId` currently holds an unexpired claim on, if any. */

@@ -3,6 +3,7 @@ import { createId, type Id, Result, ValidationError } from "@verixa/shared-kerne
 import type { Rule } from "../value-objects/rule.js";
 
 export type PolicyId = Id<"PolicyId">;
+export type PolicyStatus = "draft" | "published" | "archived";
 
 /**
  * Which resource type and actions a {@link Policy} applies to.
@@ -26,6 +27,8 @@ interface PolicyProps {
   readonly rules: readonly Rule[];
   readonly version: number;
   readonly createdAt: Date;
+  readonly status: PolicyStatus;
+  readonly dslSource: string | undefined;
 }
 
 /**
@@ -48,6 +51,8 @@ export class Policy {
   readonly rules: readonly Rule[];
   readonly version: number;
   readonly createdAt: Date;
+  readonly status: PolicyStatus;
+  readonly dslSource: string | undefined;
 
   private constructor(props: PolicyProps) {
     this.id = props.id;
@@ -56,6 +61,8 @@ export class Policy {
     this.rules = props.rules;
     this.version = props.version;
     this.createdAt = props.createdAt;
+    this.status = props.status;
+    this.dslSource = props.dslSource;
   }
 
   /**
@@ -72,6 +79,8 @@ export class Policy {
     name: string;
     target: PolicyTarget;
     rules: readonly Rule[];
+    status?: PolicyStatus;
+    dslSource?: string;
   }): Result<Policy, ValidationError> {
     const fieldErrors: Record<string, string[]> = {};
 
@@ -97,6 +106,8 @@ export class Policy {
         rules: Object.freeze([...params.rules]),
         version: 1,
         createdAt: new Date(),
+        status: params.status ?? "published",
+        dslSource: params.dslSource,
       }),
     );
   }
@@ -119,7 +130,10 @@ export class Policy {
    * name or against a different target is a new policy, not a new version
    * of this one.
    */
-  publishNewVersion(rules: readonly Rule[]): Result<Policy, ValidationError> {
+  publishNewVersion(
+    rules: readonly Rule[],
+    dslSource: string | undefined = this.dslSource,
+  ): Result<Policy, ValidationError> {
     if (rules.length === 0) {
       return Result.err(
         new ValidationError("Policy is invalid.", { rules: ["at_least_one_rule_required"] }),
@@ -132,6 +146,8 @@ export class Policy {
         rules: Object.freeze([...rules]),
         version: this.version + 1,
         createdAt: new Date(),
+        status: "published",
+        dslSource,
       }),
     );
   }

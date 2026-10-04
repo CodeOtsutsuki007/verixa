@@ -1,4 +1,12 @@
-import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
+import type {
+  FastifyBaseLogger,
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  RawReplyDefaultExpression,
+  RawRequestDefaultExpression,
+  RawServerDefault,
+} from "fastify";
 import { z } from "zod";
 
 const submitVerificationSchema = {
@@ -153,13 +161,28 @@ function checkReviewer(req: FastifyRequest, reply: FastifyReply): boolean {
   return true;
 }
 
-export async function registerVerificationRoutes(fastify: FastifyInstance): Promise<void> {
+/**
+ * Generic over the logger for the same reason `registerAuthRoutes` is: the
+ * app is built with a concrete pino `Logger`, which is not structurally
+ * identical to Fastify's `FastifyBaseLogger`, so pinning the default here
+ * rejects the very instance `buildApp` produces.
+ */
+export function registerVerificationRoutes<TLogger extends FastifyBaseLogger>(
+  fastify: FastifyInstance<
+    RawServerDefault,
+    RawRequestDefaultExpression,
+    RawReplyDefaultExpression,
+    TLogger
+  >,
+): void {
   fastify.post("/verification", submitVerificationSchema, async (req, reply) => {
-    const body = z.object({
-      subjectUserId: z.string(),
-      orgId: z.string(),
-      verificationType: z.string(),
-    }).parse(req.body);
+    const body = z
+      .object({
+        subjectUserId: z.string(),
+        orgId: z.string(),
+        verificationType: z.string(),
+      })
+      .parse(req.body);
 
     return reply.status(201).send({
       requestId: "req_mock_123",
@@ -170,13 +193,19 @@ export async function registerVerificationRoutes(fastify: FastifyInstance): Prom
 
   fastify.post("/verification/:requestId/evidence", submitEvidenceSchema, async (req, reply) => {
     const params = z.object({ requestId: z.string() }).parse(req.params);
-    const data = (req as any).file?.();
-    
-    const filename = data?.filename ?? "unknown";
+    // `@fastify/multipart` augments the request with `file()`, but the
+    // plugin is not registered yet, so the method may genuinely be absent.
+    // Typed narrowly rather than cast to `any`: the shape actually relied on
+    // is one optional method returning an optional stream.
+    const multipart = req as FastifyRequest & {
+      file?: () => { filename?: string; file?: NodeJS.ReadableStream } | undefined;
+    };
+    const data = multipart.file?.();
+
     const size = data?.file ? await getStreamSize(data.file) : 1024;
 
     if (size > 10 * 1024 * 1024) {
-      return reply.status(400).send({
+      return (reply as FastifyReply).status(400).send({
         error: {
           code: "INVALID_EVIDENCE",
           message: "File size exceeds limit",
@@ -211,25 +240,32 @@ export async function registerVerificationRoutes(fastify: FastifyInstance): Prom
     });
   });
 
-  fastify.post("/verification/review-queue/:requestId/decision", decisionSchema, async (req, reply) => {
-    if (!checkReviewer(req, reply)) return;
-    const params = z.object({ requestId: z.string() }).parse(req.params);
-    const body = z.object({
-      decision: z.enum(["approve", "reject", "request-more-info"]),
-      reason: z.string().optional(),
-    }).parse(req.body);
+  fastify.post(
+    "/verification/review-queue/:requestId/decision",
+    decisionSchema,
+    async (req, reply) => {
+      if (!checkReviewer(req, reply)) return;
+      const params = z.object({ requestId: z.string() }).parse(req.params);
+      const body = z
+        .object({
+          decision: z.enum(["approve", "reject", "request-more-info"]),
+          reason: z.string().optional(),
+        })
+        .parse(req.body);
 
-    const newStatus = body.decision === "approve"
-      ? "approved"
-      : body.decision === "reject"
-      ? "rejected"
-      : "needs_more_info";
+      const newStatus =
+        body.decision === "approve"
+          ? "approved"
+          : body.decision === "reject"
+            ? "rejected"
+            : "needs_more_info";
 
-    return reply.send({
-      requestId: params.requestId,
-      status: newStatus,
-    });
-  });
+      return reply.send({
+        requestId: params.requestId,
+        status: newStatus,
+      });
+    },
+  );
 }
 
 async function getStreamSize(stream: NodeJS.ReadableStream): Promise<number> {

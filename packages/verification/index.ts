@@ -62,6 +62,7 @@ export type { VerificationProvider } from "./application/ports/verification-prov
 export type {
   ClaimNextInReviewParams,
   ClaimNextOutcome,
+  QueueAssignmentFilter,
   QueueCandidateOptions,
   VerificationRequestRepository,
 } from "./application/ports/verification-request-repository.js";
@@ -77,6 +78,15 @@ export {
   type ClaimNextReviewCaseCommand,
   type ClaimNextReviewCasePolicy,
 } from "./application/use-cases/claim-next-review-case.js";
+export {
+  DEFAULT_QUEUE_PAGE_SIZE,
+  ListReviewQueue,
+  MAX_QUEUE_PAGE_SIZE,
+  type ListReviewQueueQuery,
+  type ReviewQueueClaim,
+  type ReviewQueueItem,
+  type ReviewQueuePage,
+} from "./application/use-cases/list-review-queue.js";
 export {
   RejectVerification,
   type RejectVerificationCommand,

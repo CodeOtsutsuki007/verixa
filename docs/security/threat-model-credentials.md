@@ -26,14 +26,14 @@ STRIDE is six categories of threat (Spoofing, Tampering, Repudiation, Informatio
 Disclosure, Denial of Service, Elevation of Privilege). Not all categories apply
 equally to credential flows; the ones that do are:
 
-| Threat | Applies | Mitigation |
-| --- | --- | --- |
-| **Spoofing** | Yes | Verify the user is who they claim: password verification, token verification |
-| **Tampering** | Yes | Hashing prevents alteration of stored passwords and tokens |
-| **Repudiation** | No | Audit logging is out of scope for Phase 04 |
-| **Information Disclosure** | Yes | The main category: token theft, credential stuffing, user enumeration |
-| **Denial of Service** | Yes | Account lockout, rate limiting (partial, Phase 15) |
-| **Elevation of Privilege** | No | Authorization (who can do what) is Phase 07 |
+| Threat                     | Applies | Mitigation                                                                   |
+| -------------------------- | ------- | ---------------------------------------------------------------------------- |
+| **Spoofing**               | Yes     | Verify the user is who they claim: password verification, token verification |
+| **Tampering**              | Yes     | Hashing prevents alteration of stored passwords and tokens                   |
+| **Repudiation**            | No      | Audit logging is out of scope for Phase 04                                   |
+| **Information Disclosure** | Yes     | The main category: token theft, credential stuffing, user enumeration        |
+| **Denial of Service**      | Yes     | Account lockout, rate limiting (partial, Phase 15)                           |
+| **Elevation of Privilege** | No      | Authorization (who can do what) is Phase 07                                  |
 
 The following sections walk through the threats in each category relevant to
 these flows, the attack vector, the mitigation, and cross-references to which
@@ -236,6 +236,7 @@ learns who is a customer or member of the platform).
 endpoint.
 
 **Attack variations:**
+
 - Response message: Some endpoints return "no such user" vs. "wrong password".
 - Response time: Missing-user lookups are faster than password verification,
   revealing the answer through latency.
@@ -577,23 +578,23 @@ will be filled when sessions are introduced.
 
 This table maps each threat to the issue(s) that mitigate it:
 
-| Threat ID | Threat | Mitigating Issues |
-| --- | --- | --- |
-| S-1 | Password guessing | 061, 067, 062, Phase 15 |
-| S-2 | Token forgery and guessing | 068, 069 |
-| T-1 | Password modification | 061 |
-| T-2 | Token modification | 068, 069 |
-| T-3 | Session hijacking | Phase 05 (out of scope) |
-| I-1 | User enumeration (login) | 064, 067 |
-| I-2 | User enumeration (reset) | 069 |
-| I-3 | Credential stuffing | 067, 062, Phase 15 |
-| I-4 | Token theft via email | 068, 069 |
-| I-5 | Token reuse after change | 069 |
-| I-6 | Session fixation | Phase 05 (out of scope) |
-| D-1 | Lockout denial of service | 067, 069 |
-| D-2 | Mail bombing | 069, Phase 15 |
-| D-3 | Resource exhaustion (CPU) | 064, 067, Phase 15 |
-| E-1 | Session persistence | Phase 05 (out of scope) |
+| Threat ID | Threat                     | Mitigating Issues       |
+| --------- | -------------------------- | ----------------------- |
+| S-1       | Password guessing          | 061, 067, 062, Phase 15 |
+| S-2       | Token forgery and guessing | 068, 069                |
+| T-1       | Password modification      | 061                     |
+| T-2       | Token modification         | 068, 069                |
+| T-3       | Session hijacking          | Phase 05 (out of scope) |
+| I-1       | User enumeration (login)   | 064, 067                |
+| I-2       | User enumeration (reset)   | 069                     |
+| I-3       | Credential stuffing        | 067, 062, Phase 15      |
+| I-4       | Token theft via email      | 068, 069                |
+| I-5       | Token reuse after change   | 069                     |
+| I-6       | Session fixation           | Phase 05 (out of scope) |
+| D-1       | Lockout denial of service  | 067, 069                |
+| D-2       | Mail bombing               | 069, Phase 15           |
+| D-3       | Resource exhaustion (CPU)  | 064, 067, Phase 15      |
+| E-1       | Session persistence        | Phase 05 (out of scope) |
 
 ---
 
@@ -706,4 +707,3 @@ cover session tokens and refresh tokens. When Phase 15 (rate limiting) is
 added, revisit the D-2 and D-3 sections. When Phase 18 (metrics and monitoring)
 is added, consider how to alert on brute-force patterns without converting
 success/failure logs into enumeration oracles.
-

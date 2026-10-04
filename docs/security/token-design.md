@@ -27,14 +27,14 @@ The split accomplishes two goals:
 }
 ```
 
-| Claim | Type | Purpose | Why It's Here |
-|-------|------|---------|--------------|
-| **sub** (subject) | UserId | The user making the request | Every request is from someone; services need to know who |
-| **sid** (session ID) | SessionId | Links the token to its session | Enables session-level revocation without token expiry wait |
-| **orgId** (organization) | string | The tenant/organization | Multi-tenancy: scope queries without a user lookup |
-| **iat** (issued at) | Unix timestamp | When the token was signed | Detect clock skew; validate freshness |
-| **exp** (expiration) | Unix timestamp | When the token expires | Verifiers reject tokens where `exp ≤ now` |
-| **kid** (key ID) | string | Which signing key was used | Enable zero-downtime key rotation (Issue 085) |
+| Claim                    | Type           | Purpose                        | Why It's Here                                              |
+| ------------------------ | -------------- | ------------------------------ | ---------------------------------------------------------- |
+| **sub** (subject)        | UserId         | The user making the request    | Every request is from someone; services need to know who   |
+| **sid** (session ID)     | SessionId      | Links the token to its session | Enables session-level revocation without token expiry wait |
+| **orgId** (organization) | string         | The tenant/organization        | Multi-tenancy: scope queries without a user lookup         |
+| **iat** (issued at)      | Unix timestamp | When the token was signed      | Detect clock skew; validate freshness                      |
+| **exp** (expiration)     | Unix timestamp | When the token expires         | Verifiers reject tokens where `exp ≤ now`                  |
+| **kid** (key ID)         | string         | Which signing key was used     | Enable zero-downtime key rotation (Issue 085)              |
 
 ## Why This Claim Set Is Minimal
 
@@ -150,13 +150,13 @@ This is standard practice (RFC 7517, JWKS) and enables zero-downtime rotation.
 
 Refresh tokens are **not JWTs**. They're high-entropy opaque strings, hashed before storage, and revocable.
 
-| Property | Access Token | Refresh Token |
-|----------|--------------|---------------|
-| Format | JWT | Opaque string |
-| TTL | 15 minutes | 7 days |
-| Verification | Stateless (public key only) | Stateful (database lookup) |
-| Revocation | Deny-list | Database status |
-| Compromise window | 15 minutes | Until refresh (rotating) |
+| Property          | Access Token                | Refresh Token              |
+| ----------------- | --------------------------- | -------------------------- |
+| Format            | JWT                         | Opaque string              |
+| TTL               | 15 minutes                  | 7 days                     |
+| Verification      | Stateless (public key only) | Stateful (database lookup) |
+| Revocation        | Deny-list                   | Database status            |
+| Compromise window | 15 minutes                  | Until refresh (rotating)   |
 
 Refresh tokens live in the database so they can be revoked immediately. Their values are hashed (like passwords) so a stolen database dump doesn't yield usable tokens.
 
@@ -179,6 +179,7 @@ A refresh token is fundamentally different from an access token in its operation
 ### Implementation: Format and Storage
 
 **Generation:**
+
 - High-entropy opaque string: 32 bytes (256 bits) from `crypto.randomBytes()`, base64-encoded
 - Byte length (256 bits) chosen for the following reasons:
   - Exceeds OWASP minimum of 128 bits for long-lived bearer tokens (RFC 6819, §5.2.2)
@@ -188,11 +189,13 @@ A refresh token is fundamentally different from an access token in its operation
   - Aligns with OAuth 2.0 and similar standards recommendations for long-lived tokens
 
 **Storage:**
+
 - SHA-256 hash only, never the raw token
 - Stored as 64-character hex string
 - Raw token exists **only in `RefreshToken.create()`'s return value** — structurally impossible to leak after that point
 
 **Comparison:**
+
 - **Not timing-safe in the domain layer** — that's an implementation detail at the use-case or repository layer
 - Repository or use case can expose a `compare(token, refreshToken)` method that uses timing-safe comparison
 - Domain entity provides the hash; comparison logic belongs above the domain
@@ -200,11 +203,13 @@ A refresh token is fundamentally different from an access token in its operation
 ### Comparison to Passwords (Issue 061)
 
 Refresh token storage mirrors password storage:
+
 - **Never stored raw:** Always hashed before persistence
 - **One-way:** A stolen database dump yields hashes, not credentials
 - **Revocable:** Unlike passwords, no expiry timeout; immediate session-level revocation is possible
 
 Unlike passwords, tokens are **ephemeral and automatically rotated:**
+
 - Compromised tokens are rotated (Issue 089) rather than requiring user action
 - User is never told "your refresh token was compromised, reset it" — they just refresh transparently and get a new one
 
@@ -229,6 +234,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** Attacker intercepts an access token (network sniffing, XSS, compromised device).
 
 **Mitigation:**
+
 - Token is short-lived (15 minutes). Attacker's window is bounded.
 - HTTPS prevents network interception.
 - Revocation list allows immediate session revocation if compromise is suspected.
@@ -238,6 +244,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** Attacker intercepts a refresh token (network sniffing, compromised device, database breach).
 
 **Mitigation:**
+
 - **Opaque and hashed:** Stored as SHA-256 hash only. A stolen database dump doesn't yield usable tokens — only hashes.
 - **High entropy:** 256 bits, making brute-force guessing infeasible even with offline attacks.
 - **Rotate-on-use:** Every time a refresh token is used, a new one is issued and the old one is immediately revoked (Issue 089). Attacker's window to use a stolen token is bounded to the time until next refresh.
@@ -248,6 +255,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** Attacker forges a token (crafts a JWT, signs it with their own key).
 
 **Mitigation:**
+
 - Tokens are signed with RS256. Forging requires the private key (which only the auth service has).
 - Verifiers check the signature before accepting any claims. A forged token is rejected immediately.
 
@@ -256,6 +264,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** Attacker modifies an existing token (changes claims, e.g., `sub` to impersonate another user).
 
 **Mitigation:**
+
 - Any modification invalidates the signature.
 - Verifiers reject tokens with invalid signatures. Tampering is detected immediately.
 
@@ -264,6 +273,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** A user logs out, but their old token continues to work.
 
 **Mitigation:**
+
 - On logout, the session is revoked and added to the deny-list.
 - Verifiers check the deny-list. Revoked sessions are rejected despite valid tokens.
 
@@ -272,6 +282,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 **Attack:** Attacker tricks a user into authenticating with a token the attacker chose.
 
 **Mitigation:**
+
 - Tokens are issued by the auth service only, not accepted from clients.
 - Session IDs are unpredictable (random UUIDs). An attacker cannot predict a token the auth service would issue.
 
@@ -354,6 +365,7 @@ This turns token rotation from a hygiene measure (limits exposure window) into a
 - **Issue 088:** Implement Redis-backed deny-list for revocation.
 - **Issue 089:** Implement `RefreshAccessToken` use case (token rotation).
 - **Issue 090:** Implement reuse detection for stolen refresh tokens.
+
 # Token Design
 
 How Verixa's session tokens are shaped, signed, rotated, and revoked, and — as

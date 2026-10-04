@@ -37,7 +37,9 @@ describe("VerifyTotpChallenge", () => {
 
   it("verifies a valid code and updates lastUsedAt and lastUsedStep", async () => {
     const { useCase, fakeRepo, savedMethods } = setup();
-    const method = MfaMethod.createPendingTotp(createId<"UserId">(), { value: "SECRET" }).activate();
+    const method = MfaMethod.createPendingTotp(createId<"UserId">(), {
+      value: "SECRET",
+    }).activate();
     await fakeRepo.save(method);
 
     const result = await useCase.execute({

@@ -65,7 +65,9 @@ export function buildApp(options: BuildAppOptions = {}) {
 
   if (options.container !== undefined) {
     registerAuthRoutes(app, options.container);
-    registerVerificationRoutes(app, options.container);
+    // Takes only the Fastify instance: this route group resolves what it
+    // needs from the request rather than from the container.
+    registerVerificationRoutes(app);
   }
 
   return app;

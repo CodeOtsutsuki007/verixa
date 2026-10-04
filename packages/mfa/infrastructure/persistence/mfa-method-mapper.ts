@@ -1,5 +1,11 @@
 import { MfaMethodRow as PrismaMfaMethodRow } from "@verixa/database";
-import { MfaMethod, type MfaMethodId, type UserId, type MfaMethodType, type MfaMethodStatus } from "../../domain/entities/mfa-method.js";
+import {
+  MfaMethod,
+  type MfaMethodId,
+  type UserId,
+  type MfaMethodType,
+  type MfaMethodStatus,
+} from "../../domain/entities/mfa-method.js";
 import { encrypt, decrypt } from "../crypto/encryption.js";
 
 export class MfaMethodMapper {

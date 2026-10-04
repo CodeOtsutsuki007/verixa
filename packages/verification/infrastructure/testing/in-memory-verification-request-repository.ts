@@ -3,6 +3,7 @@ import { Result } from "@verixa/shared-kernel";
 import type {
   ClaimNextInReviewParams,
   ClaimNextOutcome,
+  QueueAssignmentFilter,
   QueueCandidateOptions,
   VerificationRequestRepository,
 } from "../../application/ports/verification-request-repository.js";
@@ -52,13 +53,15 @@ export class InMemoryVerificationRequestRepository implements VerificationReques
 
   findQueueCandidates(options: QueueCandidateOptions = {}): Promise<VerificationRequest[]> {
     const offset = options.offset ?? 0;
+    const now = options.now ?? new Date();
 
     let rows = [...this.requests.values()]
       .filter(
         (request) =>
-          (options.status === undefined || request.status.value === options.status) &&
+          (options.statuses === undefined || options.statuses.includes(request.status.value)) &&
           (options.verificationType === undefined ||
-            request.type.value === options.verificationType),
+            request.type.value === options.verificationType) &&
+          matchesAssignment(request, options.assignment ?? "any", now),
       )
       .sort(byCreatedAt);
 
@@ -119,6 +122,27 @@ export class InMemoryVerificationRequestRepository implements VerificationReques
         request.assignment.isHeldBy(reviewerId),
     );
   }
+}
+
+/**
+ * Whether `request` belongs on the requested side of the queue's claim state.
+ *
+ * A claim counts as an assignment only while its lease is live — the same rule
+ * `VerificationRequest.isClaimableAt` applies, restated here because the fake
+ * answers a filter over a whole collection rather than one row at a time.
+ */
+function matchesAssignment(
+  request: VerificationRequest,
+  filter: QueueAssignmentFilter,
+  now: Date,
+): boolean {
+  if (filter === "any") {
+    return true;
+  }
+
+  const claim = request.assignment;
+  const assigned = claim !== undefined && claim.isActiveAt(now);
+  return filter === "assigned" ? assigned : !assigned;
 }
 
 function byCreatedAt(a: VerificationRequest, b: VerificationRequest): number {

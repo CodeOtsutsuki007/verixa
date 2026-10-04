@@ -99,9 +99,7 @@ const envSchema = z.object({
    * Per-org and per-user overrides take precedence over this value; see
    * `MfaEnforcementPolicy` in `packages/mfa`.
    */
-  MFA_ENFORCEMENT_LEVEL: z
-    .enum(["required", "optional", "disabled"])
-    .default("optional"),
+  MFA_ENFORCEMENT_LEVEL: z.enum(["required", "optional", "disabled"]).default("optional"),
 
   /**
    * Comma-separated list of MFA method types permitted globally (Issue 114).

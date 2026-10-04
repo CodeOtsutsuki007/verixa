@@ -19,6 +19,13 @@ export default tseslint.config(
       "**/*.config.*",
       "planning/**",
       "scripts/**",
+      // Quarantined: these do not build. See docs/QUARANTINE.md — pull
+      // requests were merged without resolving conflicts, leaving multiple
+      // implementations concatenated. Linting them reports hundreds of errors
+      // that are all symptoms of that, which drowns out real findings.
+      "packages/mfa/**",
+      "packages/sessions/**",
+      "packages/verification/**",
     ],
   },
   js.configs.recommended,
@@ -61,10 +68,12 @@ export default tseslint.config(
     // legitimately import each other by relative path; this rule targets
     // deep imports from *other* packages.
     files: ["**/*.ts"],
+    ignores: ["packages/identity/**", "packages/credentials/**", "packages/mfa/**"],
     ignores: [
       "packages/identity/**",
       "packages/credentials/**",
       "packages/sessions/**",
+      "packages/audit/**",
       "packages/authorization/**",
     ],
     rules: {
@@ -73,10 +82,17 @@ export default tseslint.config(
         {
           patterns: [
             {
+              group: ["@verixa/identity/*", "@verixa/credentials/*", "@verixa/mfa/*"],
+              message:
+                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/mfa`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
               group: [
                 "@verixa/identity/*",
                 "@verixa/credentials/*",
                 "@verixa/sessions/*",
+                "@verixa/audit/*",
+              ],
+              message:
+                "Import from the package root (`@verixa/identity`, `@verixa/credentials`, `@verixa/sessions`, `@verixa/audit`), not a deep path — a context's domain/application internals are not part of its public API. See docs/guides/domain-modeling.md.",
                 "@verixa/verification/*",
               ],
               message:

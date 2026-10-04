@@ -192,13 +192,13 @@ attempt earns a longer next lock.
 
 All abuse-sensitive endpoints consult the `RateLimiter` port before executing:
 
-| Flow | Action Key | Identifier |
-|------|-----------|------------|
-| Login | `login` | email address |
-| Register | `register` | email address |
-| Password Reset Request | `password-reset` | email address |
-| Password Reset Confirmation | `password-reset` | reset token |
-| Email Verification | `email-verification` | email address |
+| Flow                        | Action Key           | Identifier    |
+| --------------------------- | -------------------- | ------------- |
+| Login                       | `login`              | email address |
+| Register                    | `register`           | email address |
+| Password Reset Request      | `password-reset`     | email address |
+| Password Reset Confirmation | `password-reset`     | reset token   |
+| Email Verification          | `email-verification` | email address |
 
 ### Current Implementation
 
@@ -548,6 +548,7 @@ When a user has lost all MFA methods and backup codes, an administrator initiate
 6. On the user's next login, the MFA enforcement policy detects no active methods and gates on re-enrollment.
 
 The recovery cannot be self-triggered: the use case always requires a non-empty `actorAdminId` distinct from the user, enforcing that a human admin with elevated access authorises each recovery event.
+
 - `docs/guides/use-cases.md` — the reviewer-decision use cases, why a
   rationale note is mandatory on every approval or rejection, and why the
   claim and status-transition rules live on the aggregate rather than in the

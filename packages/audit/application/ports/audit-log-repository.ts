@@ -1,3 +1,5 @@
+import { DomainError, type Result } from "@verixa/shared-kernel";
+
 import type { AuditLogEntry } from "../../domain/entities/audit-log-entry.js";
 
 export interface AuditLogFilters {
@@ -16,6 +18,37 @@ export interface FindWithFiltersParams {
 }
 
 /**
+ * The append protocol's failure mode: someone else extended the chain first.
+ *
+ * Returned rather than thrown because it is *expected* under load — the whole
+ * point of a compare-and-set is that losing the race is a normal outcome with
+ * a defined response (re-read the head, relink, try again). A caller that has
+ * to wrap every audit write in a `try` to discover this either swallows it or
+ * crashes, and neither is what you want from the security-relevant log.
+ *
+ * Carries both hashes, because the difference between them is the diagnosis:
+ * `expected` is what the writer thought it was appending to, `actual` is what
+ * the chain head really is. If they differ, a concurrent writer won; if
+ * `actual` is a hash the caller has never seen, something else is wrong and
+ * worth a look.
+ */
+export class ChainConflictError extends DomainError {
+  readonly code = "AUDIT_CHAIN_CONFLICT";
+  // 409: the request is well-formed and conflicts with current state, which is
+  // precisely what "the chain moved underneath you" is.
+  readonly httpStatusHint = 409;
+
+  constructor(
+    readonly expectedPreviousHash: string,
+    readonly actualPreviousHash: string,
+  ) {
+    super(
+      `Audit append expected the chain head to be ${expectedPreviousHash} but found ${actualPreviousHash}.`,
+    );
+  }
+}
+
+/**
  * Persistence for the audit log.
  *
  * Deliberately has no `update` and no `delete`. Append-only is the guarantee
@@ -24,18 +57,58 @@ export interface FindWithFiltersParams {
  * Retention and erasure (Phase 24) are a different problem with different
  * rules, and will arrive as an explicit, auditable operation rather than as a
  * method that was quietly always there.
+ *
+ * ## Why every append carries `expectedPreviousHash`
+ *
+ * A new entry commits to its predecessor's hash, so writing one is only safe
+ * if you know what the predecessor is. The naive sequence — read the head,
+ * build an entry, insert it — has a window between the read and the insert in
+ * which another writer can extend the chain, producing two entries that claim
+ * the same predecessor and a forked chain in which one branch is silently
+ * unreachable.
+ *
+ * So the read is not trusted: the insert re-checks it and reports
+ * {@link ChainConflictError} when the head has moved. Callers react by
+ * re-reading and retrying, and the chain can only ever extend linearly.
  */
 export interface AuditLogRepository {
   /**
    * The most recent entry, or `undefined` when the log is empty.
    *
    * Callers need this to append: a new entry commits to its predecessor's
-   * hash, so writing one requires having read the tail.
+   * hash, so writing one requires having read the tail. Note that the value
+   * read here is a *proposal*, not a guarantee — the guarantee is the
+   * `expectedPreviousHash` check inside `append`.
    */
   findLatest(): Promise<AuditLogEntry | undefined>;
 
-  /** Appends an entry. Fails if `sequence` is already taken. */
-  append(entry: AuditLogEntry): Promise<void>;
+  /**
+   * Appends `entry` iff the chain still ends at `expectedPreviousHash`.
+   *
+   * The check and the insert must be one indivisible operation. Passing the
+   * genesis hash appends to an empty chain, which is what makes a fresh
+   * install and a raced append the same code path rather than two.
+   */
+  append(
+    entry: AuditLogEntry,
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>>;
+
+  /**
+   * Appends `entries` as one atomic unit, iff the chain ends at
+   * `expectedPreviousHash`.
+   *
+   * All-or-nothing by contract: a partial batch would leave the chain ending
+   * at an entry whose successors were rejected, which is a gap — the one thing
+   * verification is supposed to be able to detect. Callers hold each entry's
+   * `previousHash` link to its predecessor in this batch; validating that the
+   * batch is internally consistent before inserting is the adapter's job, not
+   * the caller's reward.
+   */
+  appendMany(
+    entries: readonly AuditLogEntry[],
+    expectedPreviousHash: string,
+  ): Promise<Result<void, ChainConflictError>>;
 
   /** Entries from `fromSequence` onward, in order. Used by verification. */
   findFrom(fromSequence: number, limit: number): Promise<readonly AuditLogEntry[]>;

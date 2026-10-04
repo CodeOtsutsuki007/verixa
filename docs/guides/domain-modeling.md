@@ -201,7 +201,40 @@ pushing that logic somewhere else. This previews the broader multi-tenancy
 question `planning/ARCHITECTURE.md` §8 discusses: organizations, membership,
 and (starting Phase 07) role assignment are kept as separate, composable
 concepts rather than one wide "user-org-role" record, so each can evolve
-independently.
+
+### Multi-tenancy modeling: why `UserRoleAssignment` is its own entity
+
+Following the same decoupling principle as `OrganizationMembership`, role
+assignment is modeled as a distinct domain entity (`UserRoleAssignment` in
+`packages/authorization/domain/entities/user-role-assignment.ts`) linking
+`userId` to `roleId`, scoped by `orgId` (nullable for global roles), with
+`assignedAt`, `assignedBy`, and optional `expiresAt`.
+
+We explicitly rejected two common alternatives:
+
+1. **Embedding roles on `User` (e.g. `user.roles: Role[]`):** Storing roles
+   directly on `User` conflates authentication and identity with access
+   control. It also fails to support multi-tenancy — a user cannot hold
+   `admin` in Organization A and `viewer` in Organization B if roles belong to
+   the user globally.
+2. **Coupling roles directly to `OrganizationMembership`:** Embedding a role on
+   membership assumes every role assignment is tied to a specific organization.
+   This breaks down for system-wide administrative roles (such as a global
+   compliance auditor or platform administrator) that operate across all
+   tenants, and makes temporary elevation (time-bound roles that expire via
+   `expiresAt`) unnecessarily awkward by requiring membership mutations.
+
+#### Strict scope invariants
+
+To prevent subtle authorization bugs, `UserRoleAssignment` strictly rejects
+ambiguous scopes during construction. A caller must explicitly supply either:
+
+- A non-empty, non-whitespace `orgId` for organization-scoped roles, or
+- Explicit `null` for global roles.
+
+Omitting `orgId` (or passing `undefined`) is rejected with a `ValidationError`.
+This ensures that an operator or caller cannot accidentally grant a global,
+system-wide role when they simply forgot to pass an organization context.
 
 ## Ports & adapters (hexagonal architecture)
 
@@ -391,6 +424,26 @@ existing instance in place. This is what makes append-only version history
 aggregate's own API rather than a rule the repository has to enforce on top
 of a model that would otherwise allow silently rewriting history.
 
+### Persisting policy history (Issue 150)
+
+`PrismaPolicyRepository` stores one `policies` row per `(id, version)` pair.
+The database composite primary key and the repository's insert-only
+`createMany` operation make saving a repeated version idempotent without
+overwriting it. A published change is a new row; historical rows remain
+available to explain earlier authorization decisions and support rollback.
+
+Rules are stored as JSON AST data, alongside the optional DSL source that
+produced them. The AST is what evaluation consumes; keeping the readable
+source as well makes a persisted decision explainable to an operator. The
+resource type and action selector are stored in queryable columns as well,
+with indexes for the authorization lookup path. Storing the whole selector
+only as JSON would remove that targeted query and require loading policy
+history just to find applicable rules.
+
+Policy status is versioned with each row. Only the latest published version
+is returned by `findApplicableTo`; if the latest revision is draft or
+archived, an older published revision does not silently become active again.
+
 ## Sessions and expiry policies (Phase 05, Issue 083)
 
 `Session` (packages/sessions/domain/entities/session.ts) is a stateful
@@ -499,6 +552,7 @@ The first concrete use case, `RegisterUser`
 (`packages/identity/application/use-cases/register-user.ts`), establishes
 the application layer's command-handler pattern: see
 `docs/guides/use-cases.md` for the full shape and rationale.
+
 ## MFA Secret Storage (Issue 107)
 
 Unlike passwords, which are one-way hashed using a slow KDF (Argon2), TOTP secrets must be decryptable by the server to compute expected verification codes during login. This fundamental difference requires a separate storage strategy: symmetric encryption (AES-256-GCM) with a managed key.
@@ -558,6 +612,7 @@ before their account was removed can matter for incident investigation.
 `Restrict` forces the caller to revoke assignments explicitly before deleting
 the user, making the intent visible in the audit log rather than silently
 cleaning up evidence.
+
 ## Review Queue Assignment & Optimistic Leases (Issue 173)
 
 When managing human review queues for identity verification requests, preventing two reviewers from working the same case simultaneously is critical. We modeled this using an explicit `ReviewAssignment` value object/entity that implements an **optimistic lease** (time-bounded claim) rather than a permanent lock.
