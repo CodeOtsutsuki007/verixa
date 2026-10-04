@@ -22,11 +22,6 @@ export {
   type RoleProps,
 } from "./domain/entities/role.js";
 export {
-  UserRoleAssignment,
-  type UserRoleAssignmentId,
-  type UserId,
-} from "./domain/entities/user-role-assignment.js";
-export {
   SystemRoleImmutableError,
   type SystemRoleAction,
 } from "./domain/errors/system-role-immutable-error.js";
@@ -37,10 +32,9 @@ export { InMemoryUserRoleAssignmentRepository } from "./infrastructure/fakes/in-
 export { permissionRepositoryContract } from "./infrastructure/testing/contracts/permission-repository.contract.js";
 export { roleRepositoryContract } from "./infrastructure/testing/contracts/role-repository.contract.js";
 export { userRoleAssignmentRepositoryContract } from "./infrastructure/testing/contracts/user-role-assignment-repository.contract.js";
+export {
   UserRoleAssignment,
   type CreateUserRoleAssignmentParams,
-  type OrgId,
-  type RoleId,
   type UserId,
   type UserRoleAssignmentId,
   type UserRoleAssignmentProps,
