@@ -1,6 +1,7 @@
 import { ConflictError, Result, ValidationError } from "@verixa/shared-kernel";
 
 import { type OrgId, Role } from "../../domain/entities/role.js";
+import { PermissionMatcher } from "../../domain/services/permission-matcher.js";
 import type { Permission } from "../../domain/value-objects/permission.js";
 import type { RoleRepository } from "../ports/role-repository.js";
 
@@ -36,6 +37,18 @@ export class CreateRole {
     }
 
     const role = roleResult.value;
+
+    if (!role.isSystemRole) {
+      for (const permKey of role.permissions) {
+        if (PermissionMatcher.isGlobalWildcard(permKey)) {
+          return Result.err(
+            new ValidationError('Global wildcard "*:*" can only be granted to system roles.', {
+              permissions: ["system_role_only"],
+            }),
+          );
+        }
+      }
+    }
 
     const existing = await this.roleRepository.findByName(role.name, role.orgId);
     if (existing !== undefined) {

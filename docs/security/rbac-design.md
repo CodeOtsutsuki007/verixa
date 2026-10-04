@@ -116,3 +116,32 @@ When evaluating a tenant context (`orgId: OrgId`):
 1. `PermissionChecker` resolves all active assignments specifically scoped to `orgId`.
 2. It simultaneously merges system-wide global assignments (`orgId: null`).
 3. It evaluates whether any granted permission matches the required permission (supporting action wildcards such as `admin:*`).
+
+---
+
+## 7. Wildcard & Hierarchical Permission Matching (Issue 135)
+
+### Problem Statement
+
+In large deployments, enumerating every granular permission (e.g. `users:read`, `users:write`, `users:delete`, `users:invite`, `users:export`) in role definitions is tedious and error-prone. Wildcards provide clean ergonomic aggregation while maintaining strict security boundaries.
+
+### Matching Semantics & Invariants
+
+Matching is implemented as a pure domain function in `PermissionMatcher`:
+
+1. **Exact Match:** `users:read` satisfies `users:read`.
+2. **Action Wildcard (`<resource>:*`):** A grant of `users:*` satisfies any action on `users` (`users:read`, `users:write`, `users:delete`). It strictly does **not** grant access to other resources like `orgs:read` or `user_profiles:read`.
+3. **Resource Wildcard (`*:<action>`):** A grant of `*:read` satisfies the `read` action across any resource type.
+4. **Directionality:** Matching is strictly directional: a broad grant satisfies a narrow requirement, but a narrow grant (e.g., `users:read`) never satisfies a wildcard requirement (`users:*`).
+
+### Global Wildcard (`*:*`) Restriction
+
+The global wildcard `*:*` represents complete, unrestricted administrative capability.
+
+- **System-Role Reservation:** `*:*` is strictly reserved for system roles (`isSystemRole: true`).
+- **Enforcement:** The `CreateRole` and `AssignPermissionToRole` use cases reject any attempt to grant `*:*` to custom or organization-scoped roles with a `ValidationError`. This prevents tenant administrators from inadvertently creating omnipotent roles.
+
+### Design Decisions & Alternatives Rejected
+
+- **Alternative (Regex Matching):** Rejected because arbitrary regular expressions introduce computational complexity and Regular Expression Denial of Service (ReDoS) attack vectors. Segmented token comparison (`resource:action`) executes in constant time O(1).
+- **Alternative (Inheritance Hierarchies):** Rejected because deeply nested role or permission inheritance trees introduce debugging complexity and hidden authorization side effects. Composing permissions into distinct roles and evaluating via `PermissionMatcher` guarantees transparency and auditable access control.

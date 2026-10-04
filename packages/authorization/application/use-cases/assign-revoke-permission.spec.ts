@@ -79,6 +79,43 @@ describe("AssignPermissionToRole & RevokePermissionFromRole", () => {
       }
     });
 
+    it("rejects granting the global wildcard *:* to a non-system role", async () => {
+      await permissionRepository.save(Permission.from("*:*"));
+      const roleResult = Role.create({ name: "regular-manager" });
+      if (!Result.isOk(roleResult)) throw new Error("setup failed");
+      const role = roleResult.value;
+      await roleRepository.save(role);
+
+      const result = await assignPermission.execute({
+        roleId: role.id,
+        permission: "*:*",
+      });
+
+      expect(Result.isErr(result)).toBe(true);
+      if (Result.isErr(result)) {
+        expect(result.error.code).toBe("VALIDATION_ERROR");
+        expect(result.error.message).toContain("Global wildcard");
+      }
+    });
+
+    it("allows granting the global wildcard *:* to a system role", async () => {
+      await permissionRepository.save(Permission.from("*:*"));
+      const sysRoleResult = Role.createSystemRole({ name: "super-admin" });
+      if (!Result.isOk(sysRoleResult)) throw new Error("setup failed");
+      const sysRole = sysRoleResult.value;
+      await roleRepository.save(sysRole);
+
+      const result = await assignPermission.execute({
+        roleId: sysRole.id,
+        permission: "*:*",
+      });
+
+      expect(Result.isOk(result)).toBe(true);
+      if (Result.isOk(result)) {
+        expect(result.value.hasPermission("*:*")).toBe(true);
+      }
+    });
+
     it("rejects an invalid permission format", async () => {
       const roleResult = Role.create({ name: "viewer" });
       if (!Result.isOk(roleResult)) throw new Error("setup failed");
